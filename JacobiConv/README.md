@@ -19,65 +19,33 @@ Tested combination: Python 3.9.6 + [PyTorch 1.9.0](https://pytorch.org/get-start
 
 Other required python libraries include: numpy, scikit-learn, optuna, seaborn etc.
 
-### Reproduce Our Results
+Tested on
 
-#### Image Filter Tasks
-
-To reproduce results of JacobiConv on image datasets:
-```
-python ImgFilter.py --test --repeat 1 --dataset $dataset --fixalpha
-```
-where $dataset is selected from low, high, rejection, band, and comb. 
-
-To reproduce results of linear GNN with other bases:
-```
-python ImgFilter.py --test --$basis --repeat 1 --dataset $dataset --fixalpha
-```
-where $basis is selected from cheby, power, and bern. 
-
-
-We use optuna to select hyperparameters.
-```
-python ImgFilter.py --optruns 100  --dataset $dataset  --path $dir --name $dataset
-```
-The record file of optuna will be put in directory $dir.
-
-#### Real-World Tasks
-
-To reproduce results of JacobiConv on real-world datasets:
-```
-python RealWorld.py --test --repeat 10 --dataset $dataset --split dense
-```
-where $dataset is selected from pubmed, computers, squirrel, photo, chameleon, film, cora, citeseer, texas, cornell. 
-
-To reproduce results of linear GNN with other bases:
-```
-python RealWorld.py --test --$basis  --fixalpha --repeat 10 --dataset $dataset --split dense
-```
-where $basis is selected from cheby, power, and bern. 
-
-To reproduce other ablation studies:
-
-Unifilter
-```
-python RealWorld.py --test --repeat 10 --dataset $dataset --split dense --sole
-```
-No-PCD
-```
-python RealWorld.py --test --repeat 10 --dataset $dataset --split dense --fixalpha
-```
-NL-RES 
-```
-python RealWorld.py --test --repeat 10 --dataset $dataset --split dense --resmultilayer
-```
-NL
-```
-python RealWorld.py --test --repeat 10 --dataset $dataset --split dense --multilayer
+```bash
+optuna                3.0.3
+numpy                 1.19.5
+scikit-learn          0.24.2
+seaborn               0.12.0
 ```
 
-To select hyperparameters:
+### Usage
+
+#### Data preparation
+
+Data from pytorch-geometric will be downloaded to `./data` directory
+or can be copied there via symbolic link
+
+For new datasets make symbolic link to the root in a following way:
+
 ```
-python RealWorld.py --repeat 3 --optruns 400 --split dense --dataset $dataset  --path $dir --name $dataset
+ln -s <DATA_DIR> new_data
 ```
-The record file of optuna will be put in directory $dir.
+
+#### Experiment running
+
+In order to launch experiments run `./run_real_world.sh` in the root directory.
+
+To setup the experiment edit `run_real_world.sh`.
+
+To compute averaged stats use `parse_results.py` with --result_path `<path_to_experiments>`.
 

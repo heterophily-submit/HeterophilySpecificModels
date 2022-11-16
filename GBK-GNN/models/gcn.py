@@ -281,7 +281,7 @@ def zeros(tensor):
         tensor.data.fill_(0)
 
 
-@torch.jit._overload
+# @torch.jit._overload
 def gcn_norm(edge_index, edge_weight=None, num_nodes=None, improved=False,
              add_self_loops=True, dtype=None):
 

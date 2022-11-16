@@ -2,10 +2,9 @@ import torch
 from torch.nn import CrossEntropyLoss
 import torch.nn.functional as F
 from utils.statistic import *
-from utils.metric import accuracy, compute_correct_num, compute_sigma_acc
+from utils.metric import accuracy, roc_auc, compute_correct_num, compute_sigma_acc
 from data_loader import data_loaders
 from hyperparameters_setting import *
-from data_loader.datasets_source_info import *
 import numpy as np
 import random
 import pandas as pd
@@ -19,14 +18,18 @@ def train(args, model, optimizer):
     dataset = args.dataset
     device = args.device
     if len(dataset['graph'][0].train_mask.shape) != 1:
-        train_mask = torch.unbind(dataset['graph'][0].train_mask, dim=1)[0]
+        train_mask = dataset['graph'][0].train_mask[:, args.split_id]
     else:
         train_mask = dataset['graph'][0].train_mask
 
     optimizer.zero_grad()
     loss = 0
-    acc_train = 0
-    correct_num = 0
+
+    # choose metric
+    if dataset['num_classes'] > 2:
+        metric = accuracy
+    else:
+        metric = roc_auc
 
     for i in range(len(dataset['graph'])):
         data = dataset['graph'][i].to(device)
@@ -56,56 +59,50 @@ def train(args, model, optimizer):
             loss += F.nll_loss(out[train_mask],
                                data.y[train_mask])
         if len(dataset['graph']) == 1:  # single graph
-            acc_train += accuracy(out[train_mask],
-                                  data.y[train_mask])
+            metric_train = metric(out[train_mask], data.y[train_mask])
         else:
-            correct_num += compute_correct_num(out[train_mask],
-                                               data.y[train_mask])
+            metric_train += metric(out[train_mask], data.y[train_mask]) * len(data.y)
     if not len(dataset['graph']) == 1:
-        acc_train = correct_num / dataset['num_node']
+        metric_train = metric_train / dataset['num_node']
     loss.backward()
     optimizer.step()
-    return loss, acc_train.item()
+    return loss, metric_train
 
 
-def test(args, model, mask_type="test", return_sigma_acc=False):
+def test(args, model, mask_type="test"):
     model.eval()
     dataset = args.dataset
     device = args.device
-    correct_sum = 0
-    totl_num = 0
+
+    # choose metric
+    if dataset['num_classes'] > 2:
+        metric = accuracy
+    else:
+        metric = roc_auc
 
     if mask_type == "test":
         if len(dataset['graph'][0].test_mask.shape) != 1:  # multiple splits
-            mask = torch.unbind(dataset['graph'][0].test_mask, dim=1)[0]
+            mask = dataset['graph'][0].test_mask[:, args.split_id]
         else:
             mask = dataset['graph'][0].test_mask
     if mask_type == "val":
         if len(dataset['graph'][0].val_mask.shape) != 1:  # multiple splits
-            mask = torch.unbind(dataset['graph'][0].val_mask, dim=1)[0]
+            mask = dataset['graph'][0].val_mask[:, args.split_id]
         else:
             mask = dataset['graph'][0].val_mask
 
-    for i in range(len(dataset['graph'])):
-        data = dataset['graph'][i].to(device)
-        if args.aug == True:
-            _, pred = model(data)[0].max(dim=1)
-            sigma0 = model(data)[1][0].tolist()
-            sigma_acc = compute_sigma_acc(sigma0, args.similarity)
-            print('Sigma Accuracy: {:.4f}'.format(sigma_acc))
-        else:
-            _, pred = model(data).max(dim=1)
-
-        correct_sum += int(pred[mask].eq(
-            data.y[mask]).sum().item())
-        totl_num += int(mask.sum())
-
-    acc = correct_sum / totl_num
-
-    if return_sigma_acc:
-        return acc, sigma_acc
+    assert len(dataset['graph']) == 1
+    data = dataset['graph'][0].to(device)
+    if args.aug == True:
+        out, _ = model(data)[0].max(dim=1)
+        sigma0 = model(data)[1][0].tolist()
+        sigma_acc = compute_sigma_acc(sigma0, args.similarity)
+        print('Sigma Accuracy: {:.4f}'.format(sigma_acc))
     else:
-        return acc
+        out = model(data)
+
+    metric_test = metric(out[mask], data.y[mask])
+    return metric_test
 
 
 def set_random_seed(seed):
@@ -125,15 +122,11 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     args.device = device
     torch.cuda.set_device(args.gpu_id)
-    if (args.source_name == "Actor"):
-        args.dataset_name = ""
-    source_name = args.source_name
     data_name = args.dataset_name
     model_name = args.model_type
     args.dataset = data_loaders.DataLoader(args).dataset
 
-    experiment_ans["datasetName"].append(
-        source_name + "_" + data_name)
+    experiment_ans["datasetName"].append(data_name)
     experiment_ans["nodeNum"].append(args.dataset["num_node"])
     experiment_ans["edgeNum"].append(args.dataset["num_edge"])
     experiment_ans["nodeFeaturesDim"].append(
@@ -157,6 +150,7 @@ def main():
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     best_val_acc = test_acc = 0
+    counter: int = args.patience
     for epoch in range(args.epoch):
         loss, train_acc = train(args, model, optimizer)
         val_acc = test(args, model, mask_type="val")
@@ -164,6 +158,15 @@ def main():
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             test_acc = tmp_test_acc
+            # reset counter
+            counter = args.patience
+        else:
+            counter -= 1
+        
+        if counter <= 0:
+            print(f'Early stopping on epoch {epoch}.')
+            break
+
         if (epoch + 1) % args.log_interval == 0:
             print('epoch: {:03d}'.format(epoch + 1),
                   'loss: {:.4f}'.format(loss),
@@ -172,6 +175,9 @@ def main():
                   'test_acc: {:.4f}'.format(tmp_test_acc),
                   'final_test_acc: {:.4f}'.format(test_acc)
                   )
+
+    print('*' * 10)
+    print('Final_test_acc: {:.4f}'.format(test_acc))
 
     model_train_res = model_name + "TrainAcc"
     model_val_res = model_name + "ValAcc"

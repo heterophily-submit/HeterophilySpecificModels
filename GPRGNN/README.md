@@ -24,49 +24,25 @@ pytorch-geometric
 numpy
 ```
 
-# Run experiment with Cora:
+# Usage
 
-go to folder `src`
+## Data preparation
+
+Data from pytorch-geometric will be downloaded to `./pyg_data` directory
+or can be copied there via symbolic link
+
+For new datasets make symbolic link to the root in a following way:
+
 ```
-python train_model.py --RPMAX 2 \
-        --net GPRGNN \
-        --train_rate 0.025 \
-        --val_rate 0.025 \
-        --dataset cora 
+ln -s <DATA_DIR> new_data
 ```
 
-# Create cSBM dataset:
-go to folder `src`
-```
-source create_cSBM_dataset.sh
-```
- The total size of cSBM datasets we used is over 1GB hence they are not included in this repository, but we do have a sample of the dataset in `data/cSBM_demo`. We reccommend you to regenerate these datasets using the format of above script, start its name with `'cSBM_data'` and change the parameter <img src="https://render.githubusercontent.com/render/math?math=\phi"> to what we choose in section A.10 in Appendix of our paper.
- 
-# Repreduce results in Table 2:
+## Experiment running
 
-**Update(01/06/2022):** We add the file `./src/Reproduce_GPRGNN.sh`, which can reproduce our results of GPRGNN in Table 2 by just running it! 
+In order to launch experiments run `./Reproduce_GPRGNN.sh` in the `src` directory.
 
-To reproduce the results in Table 2 of [our paper](https://openreview.net/forum?id=n6jl7fLxrP) you need to first perform hyperparameter tuning. 
-For details of optimization of all models, please refer to section A.9 in Appendix of our paper. Here are the settings for GPRGNN and APPNP:
+To setup the experiment edit `Reproduce_GPRGNN.sh`.
 
-We choose random walk path lengths with K = 10 and use a 2-layer (MLP) with 64 hidden units for the NN component. For the GPR weights, we use different initializations including PPR with <img src="https://render.githubusercontent.com/render/math?math=\alpha\in\{0.1, 0.2, 0.5, 0.9\}">, <img src="https://render.githubusercontent.com/render/math?math=\gamma_k=\delta_{0k}"> or <img src="https://render.githubusercontent.com/render/math?math=\delta_{Kk}"> and the default random initialization in pytorch. Similarly, for APPNP we search the optimal <img src="https://render.githubusercontent.com/render/math?math=\alpha\in\{0.1, 0.2, 0.5, 0.9\}">. For other hyperparameter tuning, we optimize the learning rate over {0.002, 0.01, 0.05} and weight decay {0.0, 0.0005} for all models. 
-
-<!-- <img src="https://render.githubusercontent.com/render/math?math=\alpha\in\{0.1, 0.2, 0.5, 0.9\}">
-<img src="https://render.githubusercontent.com/render/math?math=\gamma_k=\delta_{0k}">
-<img src="https://render.githubusercontent.com/render/math?math=\delta_{Kk}"> -->
-
-
-Here is a list of hyperparameters for your reference:
-
-- For cora and citeseer, choosing different alpha doesn't make big difference. So you can choose alpha = 0.1.
-- For pubmed, we choose lr = 0.05, alpha = 0.2, wd = 0.0005 and add dprate = 0.5 (dropout for GPR part).
-- For computers, we choose lr = 0.05, alpha = 0.5 and wd = 0.
-- For Photo, we choose lr = 0.01, alpha = 0.5 and wd = 0.
-- For chameleon, we choose lr = 0.05, alpha = 1, wd = 0 and dprate = 0.7.
-- For Actor, we choose lr = 0.01, alpha = 0.9, wd = 0.
-- For squirrel, we choose lr = 0.05, alpha = 0, wd = 0, dprate = 0.7.
-- For Texas, we choose lr = 0.05, alpha = 1, wd = 0.0005.
-- For Cornell, we choose lr = 0.05, alpha = 0.9, wd = 0.0005.
 
 # Citation
 Please cite our paper if you use this code in your own work:

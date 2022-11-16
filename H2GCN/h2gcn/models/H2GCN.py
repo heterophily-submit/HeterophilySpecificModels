@@ -1,7 +1,7 @@
 from . import *
 from modules import controller, monitor
 from . import _layers as layers
-from ._metrics import masked_softmax_cross_entropy, masked_accuracy
+from ._metrics import masked_softmax_cross_entropy, masked_accuracy, masked_roc_auc
 import operator
 keras = tf.keras
 
@@ -100,9 +100,15 @@ def initialize_model(args, layer_setups, optimizer, lr,
         val_loss = model._loss(predictions, y_val, val_mask)
         test_loss = masked_softmax_cross_entropy(
             predictions, y_test, test_mask)
-        train_acc = masked_accuracy(predictions, y_train, train_mask)
-        val_acc = masked_accuracy(predictions, y_val, val_mask)
-        test_acc = masked_accuracy(predictions, y_test, test_mask)
+        if len(y_train.unique) > 2:
+            train_acc = masked_accuracy(predictions, y_train, train_mask)
+            val_acc = masked_accuracy(predictions, y_val, val_mask)
+            test_acc = masked_accuracy(predictions, y_test, test_mask)
+        else:
+            train_acc = masked_roc_auc(predictions, y_train, train_mask)
+            val_acc = masked_roc_auc(predictions, y_val, val_mask)
+            test_acc = masked_roc_auc(predictions, y_test, test_mask)
+
         test_stats_dict = dict(train_acc=train_acc, val_acc=val_acc, test_accuracy=test_acc,
                                val_loss=val_loss, test_loss=test_loss, monitor=dict())
         if args.deg_acc_monitor and verbose:

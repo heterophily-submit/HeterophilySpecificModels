@@ -6,9 +6,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import networkx as nx
+
 from dgl import DGLGraph
-from utils import accuracy, preprocess_data
+from utils import accuracy, roc_auc, preprocess_data
 from model import FAGCN
+
+import warnings
+warnings.simplefilter('ignore')
 
 # torch.cuda.set_device(0)
 
@@ -23,11 +27,18 @@ parser.add_argument('--eps', type=float, default=0.3, help='Fixed scalar or lear
 parser.add_argument('--layer_num', type=int, default=2, help='Number of layers')
 parser.add_argument('--train_ratio', type=float, default=0.6, help='Ratio of training set')
 parser.add_argument('--patience', type=int, default=200, help='Patience')
+parser.add_argument('--remove_zero_in_degree_nodes', action='store_true')
+parser.add_argument('--splits_file_path', type=str, default='')
 args = parser.parse_args()
 
 device = 'cuda'
 
-g, nclass, features, labels, train, val, test = preprocess_data(args.dataset, args.train_ratio)
+g, nclass, features, labels, train, val, test = preprocess_data(
+    args.dataset, 
+    args.train_ratio, 
+    args.splits_file_path,
+    args.remove_zero_in_degree_nodes
+)
 features = features.to(device)
 labels = labels.to(device)
 rain = train.to(device)
@@ -49,8 +60,9 @@ dur = []
 los = []
 loc = []
 counter = 0
-min_loss = 100.0
-max_acc = 0.0
+max_metric = 0.0
+
+metric = accuracy if nclass > 2 else roc_auc
 
 for epoch in range(args.epochs):
     if epoch >= 3:
@@ -61,7 +73,7 @@ for epoch in range(args.epochs):
 
     cla_loss = F.nll_loss(logp[train], labels[train])
     loss = cla_loss
-    train_acc = accuracy(logp[train], labels[train])
+    train_metric = metric(logp[train], labels[train])
 
     optimizer.zero_grad()
     loss.backward()
@@ -69,27 +81,25 @@ for epoch in range(args.epochs):
 
     net.eval()
     logp = net(features)
-    test_acc = accuracy(logp[test], labels[test])
+    test_metric = metric(logp[test], labels[test])
     loss_val = F.nll_loss(logp[val], labels[val]).item()
-    val_acc = accuracy(logp[val], labels[val])
-    los.append([epoch, loss_val, val_acc, test_acc])
+    val_metric = metric(logp[val], labels[val])
+    los.append([epoch, loss_val, val_metric, test_metric])
 
-    if loss_val < min_loss and max_acc < val_acc:
-        min_loss = loss_val
-        max_acc = val_acc
+    # print(f'[Accuracy] Train:{train_metric:.3f} Val:{val_metric:.3f} Test:{test_metric:.3f}')
+
+    if max_metric < val_metric:
+        max_metric = val_metric
         counter = 0
     else:
         counter += 1
 
-    if counter >= args.patience and args.dataset in ['cora', 'citeseer', 'pubmed']:
+    if counter >= args.patience:
         print('early stop')
         break
 
     if epoch >= 3:
         dur.append(time.time() - t0)
-
-    print("Epoch {:05d} | Loss {:.4f} | Train {:.4f} | Val {:.4f} | Test {:.4f} | Time(s) {:.4f}".format(
-        epoch, loss_val, train_acc, val_acc, test_acc, np.mean(dur)))
 
 
 if args.dataset in ['cora', 'citeseer', 'pubmed'] or 'syn' in args.dataset:

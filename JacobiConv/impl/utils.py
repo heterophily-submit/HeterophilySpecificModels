@@ -16,7 +16,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description='')
     # Data settings
     parser.add_argument('--dataset', type=str)
-    parser.add_argument('--split', type=str, default="dense")
+    parser.add_argument('--split', type=str, default="default", 
+                        choices=["dense", "sparse", "default"])
+    parser.add_argument('--split_id', type=int, default=0)                    
 
     # Train settings
     parser.add_argument('--repeat', type=int, default=1)
@@ -43,8 +45,6 @@ def parse_args():
     print("args = ", args)
     return args
 
-
-
 def train(optimizer, model, ds, loss_fn):
     optimizer.zero_grad()
     model.train()
@@ -54,7 +54,6 @@ def train(optimizer, model, ds, loss_fn):
     optimizer.step()
     return loss.item()
 
-
 @torch.no_grad()
 def test(model, ds, metrics, loss_fn=None):
     model.eval()
@@ -62,4 +61,3 @@ def test(model, ds, metrics, loss_fn=None):
     y = ds.y
     loss = loss_fn(pred, y)
     return metrics(pred.cpu().numpy(), y.cpu().numpy()), loss
-

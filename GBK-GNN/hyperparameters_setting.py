@@ -1,5 +1,6 @@
 import argparse
 from models import dnn, gat, gcn, gin, sage, gcn2
+
 MODEL_CLASSES = {'DNN': dnn.DNN, 'GraphSage': sage.GraphSage,
                  'GIN': gin.GIN, 'GCN2': gcn2.GCN2,
                  'GCN': gcn.GCN, 'GAT': gat.GAT, }
@@ -14,6 +15,8 @@ class HyperparameterSetting:
                                 help="log interval while training.")
             parser.add_argument('--epoch', type=int, default=500,
                                 help="num of training epoches.")
+            parser.add_argument('--patience', type=int, default=100,
+                                help="number of epochs without improvement for early stopping.")
             parser.add_argument('--seed', type=int, default=1,
                                 help="random seed.")
             parser.add_argument('--gpu_id', type=int, default=0,
@@ -31,6 +34,7 @@ class HyperparameterSetting:
                                 help="size of hidden state in network.")
             parser.add_argument("--split", nargs="+",
                                 default=[0.6, 0.2, 0.2], type=float)
+            parser.add_argument("--split_id", default=0, type=int)
             parser.add_argument('--aug', dest='aug', default=False, action='store_true',
                                 help="Whether use our message passing method.")
             parser.add_argument('--lamda', type=float, default=1.84,
@@ -42,6 +46,8 @@ class HyperparameterSetting:
                                 type=str, help="source of dataset.")
             parser.add_argument("--dataset_name", default="Texas",
                                 type=str, help="name of dataset.")
+            parser.add_argument('--remove_zero_degree_nodes', action='store_true', 
+                                help="Whether to remove zero degree nodes.")
 
             self.parser = parser
 

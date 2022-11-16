@@ -32,14 +32,6 @@ pip install -r requirements.txt
 We select some important files for detailed description.
 
 ```python
-|-- large-scale # experiments for 6 large-scale datasets
-    |-- data/ # some large-scale datasets
-    |-- dataset/  # the remaining large-scale datasets
-    |-- experiments/  # all run shs
-    |-- main.py # the main code
-    |-- main_z.py # obtains coefficient matrix z 
-    |-- models.py # includes all model implementations
-|-- paper-plots # all experimental plots in our paper
 |-- small-scale # experiments for 9 small-scale datasets
     |-- data/ # 3 old datasets, including cora, citeseer, and pubmed
     |-- new-data/ # 6 new datasets, including texas, wisconsin, cornell, actor, squirrel, and chameleon
@@ -50,31 +42,9 @@ We select some important files for detailed description.
     |-- main_h.py # obtains final layer embedding h
 ```
 
-## Run pipeline for big-scale datasets
-1. Entering the large-scale directory and download 6 big-scale datasets from the repository of [LINKX](https://github.com/CUAI/Non-Homophily-Large-Scale). Notice, you should rename the datasets and place them in the right directory.
-```python
-cd large-scale
-```
-
-2. You can run any models implemented in 'models.py'. For examples, you can run our model on 'genius' dataset by the script:
-```python
-python main.py --dataset genius --sub_dataset None --method mlpnorm
-```
-And you can run other models, such as 
-```python
-python main.py --dataset genius --sub_dataset None --method acmgcn
-```
-For more experiments running details, you can ref the running sh in the 'experiments/' directory.
-
-3. You can reproduce the experimental results of our method by running the scripts:
-```python
-bash run_glognn_sota_reproduce_big.sh
-bash run_glognn++_sota_reproduce_big.sh
-```
 
 
-
-## Run pipeline for small-scale datasets
+## Run pipeline for small-scale datasets (original scripts)
 1. Entering the large-scale directory and we provide the original datasets with their splits.
 ```python
 cd small-scale
@@ -94,6 +64,23 @@ bash run_glognn_sota_reproduce_small.sh
 bash run_glognn++_sota_reproduce_small.sh
 ```
 
+## Run our pipeline
+
+### Data preparation
+
+For new datasets make symbolic link to the root in a following way:
+
+```
+ln -s <DATA_DIR> new_data
+```
+
+To replicate our results for GloGNN edit `run_train.sh` and run
+
+```bash
+./run_train.sh
+```
+
+To compute averaged stats use `small-scale/print_results.py` with --result_path `<path_to_experiments>`.
 
 ## Attribution
 

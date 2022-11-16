@@ -45,7 +45,7 @@ class BaseGraph:
         return self
 
 
-def split(data: BaseGraph, split: str="dense"):
+def split(data: BaseGraph, split: str="dense", split_id: int = 0):
     '''
     split data in to train/valid/test set.
     Args:
@@ -54,16 +54,23 @@ def split(data: BaseGraph, split: str="dense"):
     '''
     dense_split = [0.6, 0.2]
     sparse_split = [0.025, 0.025]
-    if split == "dense":
-        u_split = dense_split
-    elif split == "sparse":
-        u_split = sparse_split
+    if split == "default":
+        for mask_type in ['train', 'val', 'test']:
+            assert hasattr(data, f'{mask_type}_mask')
+        train_mask, val_mask, test_mask = \
+            data.train_mask[:, split_id], data.val_mask[:, split_id], data.test_mask[:, split_id]
     else:
-        raise NotImplementedError("split is dense or sparse")
-    percls_trn = int(round(u_split[0] * len(data.y) / data.num_classes))
-    val_lb = int(round(u_split[1] * len(data.y)))
-    train_mask, val_mask, test_mask = du.random_planetoid_splits(
-        data, data.num_classes, percls_trn, val_lb)
+        if split == "dense":
+            u_split = dense_split
+        elif split == "sparse":
+            u_split = sparse_split
+        else:
+            raise NotImplementedError("split is dense or sparse")
+        percls_trn = int(round(u_split[0] * len(data.y) / data.num_classes))
+        val_lb = int(round(u_split[1] * len(data.y)))
+        train_mask, val_mask, test_mask = du.random_planetoid_splits(
+            data, data.num_classes, percls_trn, val_lb)
+            
     dev = data.x.device
     mask = torch.empty((data.x.shape[0]), dtype=torch.int8, device=dev)
     mask[train_mask] = 0
@@ -72,27 +79,33 @@ def split(data: BaseGraph, split: str="dense"):
     return mask
 
 
-def load_dataset(name: str, split_t="dense"):
+def load_dataset(name: str, split_t="dense", split_id: int = 0):
     '''
     load dataset into a base graph format.
     '''
     savepath = f"./data/{name}.pt"
     if name in [
             'cora', 'citeseer', 'pubmed', 'computers', 'photo', 'texas',
-            'cornell', 'chameleon', 'film', 'squirrel'
+            'cornell', 'chameleon', 'actor', 'squirrel', 'wisconsin',
+            'wiki_cooc', 'roman_empire', 'minesweeper', 'questions', 
+            'amazon_ratings', 'squirrel_filtered', 'chameleon_filtered'
     ]:
         if os.path.exists(savepath):
-            bg = torch.load(savepath, map_location="cpu")
-            bg.mask = split(bg, split=split_t)
-            return bg
+            pass
+            # bg = torch.load(savepath, map_location="cpu")
+            # bg.mask = split(bg, split=split_t)
+            # return bg
         ds = du.DataLoader(name)
         data = ds[0]
-        data.num_classes = ds.num_classes
+        if isinstance(ds, list):
+            data.num_classes = len(torch.unique(data.y))
+        else:
+            data.num_classes = ds.num_classes
         x = data.x  # torch.empty((data.x.shape[0], 0))
         ei = data.edge_index
         ea = torch.ones(ei.shape[1])
-        y = data.y
-        mask = split(data, split=split_t)
+        y = data.y 
+        mask = split(data, split=split_t, split_id=split_id)
         bg = BaseGraph(x, ei, ea, y, mask)
         bg.num_classes = data.num_classes
         bg.y = bg.y.to(torch.int64)

@@ -8,51 +8,56 @@
 """
 
 import argparse
-from dataset_utils import DataLoader
-from utils import random_planetoid_splits
-from GNN_models import *
-
+import numpy as np
 import torch
 import torch.nn.functional as F
+
+from dataset_utils import DataLoader
+from sklearn.metrics import roc_auc_score
+from GNN_models import *
 from tqdm import tqdm
 
-import numpy as np
+
+@torch.no_grad()
+def accuracy(pr_logits, gt_labels):
+    return (pr_logits.argmax(dim=-1) == gt_labels).float().mean().item()
+
+@torch.no_grad()
+def roc_auc(pr_logits, gt_labels):
+    return roc_auc_score(gt_labels.cpu().numpy(), pr_logits[:, 1].cpu().numpy())   
 
 
-def RunExp(args, dataset, data, Net, percls_trn, val_lb):
-
-    def train(model, optimizer, data, dprate):
-        model.train()
-        optimizer.zero_grad()
-        out = model(data)[data.train_mask]
-        nll = F.nll_loss(out, data.y[data.train_mask])
-        loss = nll
-        loss.backward()
-
-        optimizer.step()
-        del out
-
-    def test(model, data):
-        model.eval()
-        logits, accs, losses, preds = model(data), [], [], []
-        for _, mask in data('train_mask', 'val_mask', 'test_mask'):
-            pred = logits[mask].max(1)[1]
-            acc = pred.eq(data.y[mask]).sum().item() / mask.sum().item()
-
-            loss = F.nll_loss(model(data)[mask], data.y[mask])
-
-            preds.append(pred.detach().cpu())
-            accs.append(acc)
-            losses.append(loss.detach().cpu())
-        return accs, preds, losses
-
+def RunExp(args, dataset, data, Net, split_id):
     appnp_net = Net(dataset, args)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    permute_masks = random_planetoid_splits
-    data = permute_masks(data, dataset.num_classes, percls_trn, val_lb)
-
     model, data = appnp_net.to(device), data.to(device)
+
+    train_mask, val_mask, test_mask = \
+        data.train_mask[:, split_id], data.val_mask[:, split_id], data.test_mask[:, split_id]
+
+    def train(model, optimizer, data):
+        model.train()
+        optimizer.zero_grad()
+        out = model(data)[train_mask]
+        loss = F.nll_loss(out, data.y[train_mask])
+        loss.backward()
+        optimizer.step()
+        del out
+
+    @torch.no_grad()
+    def evaluate(model, data, metric: accuracy):
+        model.eval()
+        # predict on whole data
+        logits = model(data)
+        stats = {}
+        for partition, mask in zip(['val', 'test'], [val_mask, test_mask]):
+            loss = F.nll_loss(logits[mask], data.y[mask]).item()
+            metric_value = metric(logits[mask], data.y[mask])
+            stats[f'{partition}/loss'] = loss
+            stats[f'{partition}/metric'] = metric_value
+            
+        return stats
 
     if args.net in ['APPNP', 'GPRGNN']:
         optimizer = torch.optim.Adam([{
@@ -70,42 +75,42 @@ def RunExp(args, dataset, data, Net, percls_trn, val_lb):
         ],
             lr=args.lr)
     else:
-        optimizer = torch.optim.Adam(model.parameters(),
-                                     lr=args.lr,
-                                     weight_decay=args.weight_decay)
+        optimizer = torch.optim.Adam(
+            model.parameters(),
+            lr=args.lr,
+            weight_decay=args.weight_decay
+        )
 
-    best_val_acc = test_acc = 0
-    best_val_loss = float('inf')
-    val_loss_history = []
-    val_acc_history = []
+    metric_fn = accuracy if dataset.num_classes > 2 else roc_auc
+
+    best_epoch = 0
+    best_val_metric = 0
+    test_metric = 0
+    patience = 0
 
     for epoch in range(args.epochs):
-        train(model, optimizer, data, args.dprate)
+        train(model, optimizer, data)
 
-        [train_acc, val_acc, tmp_test_acc], preds, [
-            train_loss, val_loss, tmp_test_loss] = test(model, data)
+        stats = evaluate(model, data, metric_fn)
 
-        if val_loss < best_val_loss:
-            best_val_acc = val_acc
-            best_val_loss = val_loss
-            test_acc = tmp_test_acc
+        if stats['val/metric'] > best_val_metric:
+            best_val_metric = stats['val/metric']
+            test_metric = stats['test/metric']
             if args.net == 'GPRGNN':
                 TEST = appnp_net.prop1.temp.clone()
                 Alpha = TEST.detach().cpu().numpy()
             else:
                 Alpha = args.alpha
             Gamma_0 = Alpha
+            # set patience to 0
+            patience = 0
 
-        if epoch >= 0:
-            val_loss_history.append(val_loss)
-            val_acc_history.append(val_acc)
-            if args.early_stopping > 0 and epoch > args.early_stopping:
-                tmp = torch.tensor(
-                    val_loss_history[-(args.early_stopping + 1):-1])
-                if val_loss > tmp.mean().item():
-                    break
+        else:
+            patience += 1
+        if patience >= args.early_stopping:
+            break
 
-    return test_acc, best_val_acc, Gamma_0
+    return test_metric, best_val_metric, Gamma_0
 
 
 if __name__ == '__main__':
@@ -130,11 +135,11 @@ if __name__ == '__main__':
                         choices=['PPNP', 'GPR_prop'])
     parser.add_argument('--heads', default=8, type=int)
     parser.add_argument('--output_heads', default=1, type=int)
-
     parser.add_argument('--dataset', default='Cora')
-    parser.add_argument('--cuda', type=int, default=0)
     parser.add_argument('--RPMAX', type=int, default=10)
-    parser.add_argument('--net', type=str, choices=['GCN', 'GAT', 'APPNP', 'ChebNet', 'JKNet', 'GPRGNN'],
+    parser.add_argument('--net', 
+                        type=str, 
+                        choices=['GCN', 'GAT', 'APPNP', 'ChebNet', 'JKNet', 'GPRGNN'],
                         default='GPRGNN')
 
     args = parser.parse_args()
@@ -166,21 +171,20 @@ if __name__ == '__main__':
     percls_trn = int(round(train_rate*len(data.y)/dataset.num_classes))
     val_lb = int(round(val_rate*len(data.y)))
     TrueLBrate = (percls_trn*dataset.num_classes+val_lb)/len(data.y)
+    print(f'Number of classes: {dataset.num_classes}')
     print('True Label rate: ', TrueLBrate)
 
     args.C = len(data.y.unique())
     args.Gamma = Gamma_0
 
     Results0 = []
+    assert RPMAX <= data.train_mask.shape[1] 
 
     for RP in tqdm(range(RPMAX)):
-
-        test_acc, best_val_acc, Gamma_0 = RunExp(
-            args, dataset, data, Net, percls_trn, val_lb)
+        test_acc, best_val_acc, Gamma_0 = RunExp(args, dataset, data, Net, RP)
         Results0.append([test_acc, best_val_acc, Gamma_0])
 
     test_acc_mean, val_acc_mean, _ = np.mean(Results0, axis=0) * 100
     test_acc_std = np.sqrt(np.var(Results0, axis=0)[0]) * 100
     print(f'{gnn_name} on dataset {args.dataset}, in {RPMAX} repeated experiment:')
-    print(
-        f'test acc mean = {test_acc_mean:.4f} \t test acc std = {test_acc_std:.4f} \t val acc mean = {val_acc_mean:.4f}')
+    print(f'test acc mean = {test_acc_mean:.2f} +- {test_acc_std:.2f}')

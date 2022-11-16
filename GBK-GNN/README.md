@@ -47,10 +47,21 @@ where `${CUDA}` and `${TORCH}` should be replaced by the specific CUDA version (
 
 ## Run code
 
-Here is an example script to run our code.
+### Data preparatation
 
-```bash
-python node_classification.py --model_type GraphSage --source_name Planetoid --dataset_name Cora --aug --lamda 30
+Data from pytorch-geometric will be downloaded to `./data` directory
+or can be copied there via symbolic link
+
+For new datasets make symbolic link to the root in a following way:
+
+```
+ln -s <DATA_DIR> new_data
 ```
 
-Our method is implemented on GCN, GraphSage, GAT and GAT2. If you want to use our method, set --aug. The GBK-GNN in our paper is based on GraphSage. You can also run code in batch by modifying `run.sh`.
+The method is implemented on GCN, GraphSage, GAT and GAT2.
+
+In order to run experiments edit and launch `run_train.sh`. 
+
+Do not set `--aug` flag.
+
+To compute averaged stats use `parse_results.py` with --result_path `<path_to_experiments>`.

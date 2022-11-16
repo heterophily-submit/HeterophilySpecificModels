@@ -17,6 +17,7 @@ from collections import defaultdict
 import os
 import json
 import warnings
+from sklearn.metrics import roc_auc_score
 
 warnings.filterwarnings('ignore')
 
@@ -166,7 +167,6 @@ class MLP_NORM(nn.Module):
         return F.log_softmax(x, dim=1)
 
     def norm_func1(self, x, h0, adj):
-        # print('norm_func1 run')
         coe = 1.0 / (self.alpha + self.beta)
         coe1 = 1 - self.gamma
         coe2 = 1.0 / coe1
@@ -183,7 +183,6 @@ class MLP_NORM(nn.Module):
         return res
 
     def norm_func2(self, x, h0, adj):
-        # print('norm_func2 run')
         coe = 1.0 / (self.alpha + self.beta)
         coe1 = 1 - self.gamma
         coe2 = 1.0 / coe1
@@ -202,8 +201,6 @@ class MLP_NORM(nn.Module):
         # calculate z
         xx = torch.mm(x, x.t())
         hx = torch.mm(h0, x.t())
-        # print('adj', adj.shape)
-        # print('orders_weight', self.orders_weight[0].shape)
         adj = adj.to_dense()
         adjk = adj
         a_sum = adjk * self.orders_weight[0]
@@ -212,8 +209,7 @@ class MLP_NORM(nn.Module):
             a_sum += adjk * self.orders_weight[i]
         z = torch.mm(coe1 * xx + self.beta * a_sum - self.gamma * coe1 * hx,
                      torch.inverse(coe1 * coe1 * xx + (self.alpha + self.beta) * self.nodes_eye))
-        # print(z.shape)
-        # print(z)
+
         return res
 
     def order_func1(self, x, res, adj):
@@ -228,8 +224,6 @@ class MLP_NORM(nn.Module):
     def order_func2(self, x, res, adj):
         # Orders2
         tmp_orders = torch.spmm(adj, res)
-        print('tmp_orders', tmp_orders.shape)
-        print('orders_weight', self.orders_weight[0].shape)
         sum_orders = tmp_orders * self.orders_weight[0]
         for i in range(1, self.orders):
             tmp_orders = torch.spmm(adj, tmp_orders)
@@ -269,11 +263,13 @@ def normalize(mx):
     return mx
 
 
-def accuracy(output, labels):
-    preds = output.max(1)[1].type_as(labels)
-    correct = preds.eq(labels).double()
-    correct = correct.sum()
-    return correct / len(labels)
+@torch.no_grad()
+def accuracy(pr_logits, gt_labels):
+    return (pr_logits.argmax(dim=-1) == gt_labels).float().mean().item()
+
+@torch.no_grad()
+def roc_auc(pr_logits, gt_labels):
+    return roc_auc_score(gt_labels.cpu().numpy(), pr_logits[:, 1].cpu().numpy()) 
 
 
 def sparse_mx_to_torch_sparse_tensor(sparse_mx):
@@ -295,7 +291,7 @@ def parse_index_file(filename):
     return index
 
 
-def load_data_new(dataset_str, split):
+def load_data_new(dataset_str, split, remove_zero_in_degree_nodes: bool = False):
     """
     Loads input data from gcn/data directory
 
@@ -315,8 +311,7 @@ def load_data_new(dataset_str, split):
     :param dataset_str: Dataset name
     :return: All data input files loaded (as well the training/test data).
     """
-    # print('dataset_str', dataset_str)
-    # print('split', split)
+
     if dataset_str in ['citeseer', 'cora', 'pubmed']:
         names = ['x', 'y', 'tx', 'ty', 'allx', 'ally', 'graph']
         objects = []
@@ -384,6 +379,8 @@ def load_data_new(dataset_str, split):
         graph_node_features_and_labels_file_path = os.path.join('new_data', dataset_str,
                                                                 f'out1_node_feature_label.txt')
         graph_dict = defaultdict(list)
+
+        valid_ids = []
         with open(graph_adjacency_list_file_path) as graph_adjacency_list_file:
             graph_adjacency_list_file.readline()
             for line in graph_adjacency_list_file:
@@ -391,15 +388,23 @@ def load_data_new(dataset_str, split):
                 assert (len(line) == 2)
                 graph_dict[int(line[0])].append(int(line[1]))
                 graph_dict[int(line[1])].append(int(line[0]))
+                valid_ids.append(int(line[1]))
+        
+        # get unique ids
+        valid_ids = np.unique(valid_ids)
 
-        # print(sorted(graph_dict))
+        # filter graph
+        preproc_fn = (
+            lambda x: x, 
+            lambda x: list(filter(lambda v: v in valid_ids, x))
+        )[remove_zero_in_degree_nodes]
+        
         graph_dict_ordered = defaultdict(list)
         for key in sorted(graph_dict):
-            graph_dict_ordered[key] = graph_dict[key]
+            graph_dict_ordered[key] = preproc_fn(graph_dict[key])
             graph_dict_ordered[key].sort()
 
         adj = nx.adjacency_matrix(nx.from_dict_of_lists(graph_dict_ordered))
-        # adj = sp.csr_matrix(adj)
 
         graph_node_features_dict = {}
         graph_labels_dict = {}
@@ -442,6 +447,9 @@ def load_data_new(dataset_str, split):
         label_classes = max(labels_list) + 1
         labels = np.eye(label_classes)[labels_list]
 
+        if len(labels.shape) == 2:
+            labels = labels.argmax(axis=-1)
+
         splits_file_path = 'splits/' + dataset_str + \
             '_split_0.6_0.2_' + str(split) + '.npz'
 
@@ -449,6 +457,29 @@ def load_data_new(dataset_str, split):
             train_mask = splits_file['train_mask']
             val_mask = splits_file['val_mask']
             test_mask = splits_file['test_mask']
+
+        if remove_zero_in_degree_nodes:
+            valid_mask = np.zeros_like(train_mask)
+            valid_mask[valid_ids] = 1
+        else:
+            valid_mask = np.ones_like(train_mask)
+
+        idx_train = np.where(train_mask & valid_mask == 1)[0]
+        idx_val = np.where(val_mask & valid_mask == 1)[0]
+        idx_test = np.where(test_mask & valid_mask == 1)[0]
+
+    elif dataset_str in ['wiki_cooc', 'roman_empire', 'minesweeper', 'questions', 'amazon_ratings', 'workers']:
+        npz_data = np.load(f'new_data/{dataset_str}.npz')
+
+        edge = npz_data['edges']
+        labels = npz_data['node_labels']
+        features = npz_data['node_features']
+
+        adj = nx.adj_matrix(nx.from_edgelist(edge))
+
+        train_mask = npz_data['train_masks'][split]
+        val_mask   = npz_data['val_masks'][split]
+        test_mask  = npz_data['test_masks'][split]
 
         idx_train = np.where(train_mask == 1)[0]
         idx_val = np.where(val_mask == 1)[0]
@@ -458,19 +489,20 @@ def load_data_new(dataset_str, split):
     adj = sparse_mx_to_torch_sparse_tensor(adj)
 
     features = normalize(features)
-    features = torch.FloatTensor(np.array(features.todense()))
-    labels = torch.LongTensor(np.where(labels))[1]
+    if isinstance(features, np.ndarray):
+        features = torch.FloatTensor(features)
+    else:
+        features = torch.FloatTensor(np.array(features.todense()))
+    if isinstance(labels, np.ndarray):
+        labels = torch.LongTensor(labels)
+    else:
+        labels = torch.LongTensor(np.where(labels))[1]
     idx_train = torch.LongTensor(idx_train)
     idx_val = torch.LongTensor(idx_val)
     idx_test = torch.LongTensor(idx_test)
 
-    # print('adj', adj.shape)
-    # print('features', features.shape)
-    # print('labels', labels.shape)
-    # print('idx_train', idx_train.shape)
-    # print('idx_val', idx_val.shape)
-    # print('idx_test', idx_test.shape)
     return adj, features, labels, idx_train, idx_val, idx_test
+
 
 
 # Training settings
@@ -514,6 +546,9 @@ parser.add_argument('--orders_func_id', type=int, default=3,
                     help='Sum function of adj orders in norm layer, ids \in [1, 2, 3]')
 parser.add_argument('--norm_func_id', type=int, default=2,
                     help='Function of norm layer, ids \in [1, 2]')
+#
+parser.add_argument('--remove_zero_in_degree_nodes', action='store_true', default=False,
+                    help='Whether to remove zero_in_degree_nodes.')         
 
 
 args = parser.parse_args()
@@ -526,7 +561,7 @@ if args.cuda:
 
 # Load data
 adj, features, labels, idx_train, idx_val, idx_test = load_data_new(
-    args.dataset, args.split)
+    args.dataset, args.split, args.remove_zero_in_degree_nodes)
 
 
 # Change data type to float
@@ -570,22 +605,24 @@ if args.cuda:
 
 
 # Train model
-cost_val = []
 t_total = time.time()
 
+num_labels = len(torch.unique(labels))
 
-# print(model.diag_weight)
+metric = accuracy if num_labels > 2 else roc_auc
+
+best_metric = 0
+patience = 0
+
 for epoch in range(args.epochs):
     t = time.time()
     model.train()
     optimizer.zero_grad()
     output = model(features, adj)
     loss_train = F.nll_loss(output[idx_train], labels[idx_train])
-    acc_train = accuracy(output[idx_train], labels[idx_train])
+    metric_train = metric(output[idx_train], labels[idx_train])
     loss_train.backward()
     optimizer.step()
-
-    # print(model.diag_weight)
 
     if not args.fastmode:
         # Evaluate validation set performance separately,
@@ -594,43 +631,37 @@ for epoch in range(args.epochs):
         output = model(features, adj)
 
     loss_val = F.nll_loss(output[idx_val], labels[idx_val])
-    acc_val = accuracy(output[idx_val], labels[idx_val])
-    # print('Epoch: {:04d}'.format(epoch+1),
-    #       'loss_train: {:.4f}'.format(loss_train.item()),
-    #       'acc_train: {:.4f}'.format(acc_train.item()),
-    #       'loss_val: {:.4f}'.format(loss_val.item()),
-    #       'acc_val: {:.4f}'.format(acc_val.item()),
-    #       'time: {:.4f}s'.format(time.time() - t))
-    cost_val.append(loss_val.item())
-    if epoch > args.early_stopping and cost_val[-1] > np.mean(cost_val[-(args.early_stopping+1):-1]):
-        # print("Early stopping...")
+    metric_val = metric(output[idx_val], labels[idx_val])
+
+    if metric_val > best_metric:
+        best_metric = metric_val
+        patience = 0
+    else:
+        patience += 1
+
+    if patience >= args.early_stopping:
         break
-# print("Optimization Finished!")
-# print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
 
 outfile_name = f"{args.dataset}_lr{args.lr}_do{args.dropout}_es{args.early_stopping}_" +\
     f"wd{args.weight_decay}_alpha{args.alpha}_beta{args.beta}_gamma{args.gamma}_" +\
     f"delta{args.delta}_nlid{args.norm_func_id}_nl{args.norm_layers}_" +\
     f"ordersid{args.orders_func_id}_orders{args.orders}_split{args.split}_results.txt"
-print(outfile_name)
 
 # Testing
 model.eval()
 output = model(features, adj)
 loss_test = F.nll_loss(output[idx_test], labels[idx_test])
-acc_test = accuracy(output[idx_test], labels[idx_test])
+metric_test = metric(output[idx_test], labels[idx_test])
 print("Test set results:",
       "loss= {:.4f}".format(loss_test.item()),
-      "accuracy= {:.4f}".format(acc_test.item()))
+      "accuracy= {:.4f}".format(metric_test))
 
 test_time = time.time()
 results_dict = {}
 results_dict['test_cost'] = float(loss_test.item())
-results_dict['test_acc'] = float(acc_test.item())
+results_dict['test_acc'] = float(metric_test)
 results_dict['test_duration'] = time.time()-test_time
 
-
-# outfile_name = f'''{args.dataset}_split{args.split}_results.txt'''
-
+os.makedirs('runs', exist_ok=True)
 with open(os.path.join('runs', outfile_name), 'w') as outfile:
     outfile.write(json.dumps(results_dict))

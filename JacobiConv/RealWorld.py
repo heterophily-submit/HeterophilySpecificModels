@@ -8,9 +8,10 @@ import numpy as np
 import seaborn as sns
 
 
-def split():
+def split(resplit: bool = True):
     global baseG, trn_dataset, val_dataset, tst_dataset
-    baseG.mask = datasets.split(baseG, split=args.split)
+    if resplit:
+        baseG.mask = datasets.split(baseG, split=args.split, split_id=args.split_id)
     trn_dataset = GDataset.GDataset(*baseG.get_split("train"))
     val_dataset = GDataset.GDataset(*baseG.get_split("valid"))
     tst_dataset = GDataset.GDataset(*baseG.get_split("test"))
@@ -88,11 +89,14 @@ def work(conv_layer: int = 10,
          wd3: float = 0,
          dpb=0.0,
          dpt=0.0,
+         patience: int = 100,
+         split_type: str = 'default',
          **kwargs):
     outs = []
     for rep in range(args.repeat):
         utils.set_seed(rep)
-        split()
+        if split_type != 'default':
+            split()
         gnn = buildModel(conv_layer, aggr, alpha, dpb, dpt, **kwargs)
         optimizer = Adam([{
             'params': gnn.emb.parameters(),
@@ -117,7 +121,7 @@ def work(conv_layer: int = 10,
                 val_score = score
             else:
                 early_stop += 1
-            if early_stop > 200:
+            if early_stop > patience:
                 break
         outs.append(val_score)
     return np.average(outs)
@@ -163,13 +167,16 @@ def test(conv_layer=10,
          wd3=0.0,
          dpb=0.0,
          dpt=0.0,
+         patience: int = 100,
+         split_type: str = 'default',
          **kwargs):
     outs = []
     vals = []
     for rep in range(args.repeat):
         print("repeat ", rep)
         utils.set_seed(rep)
-        split()
+        if split_type != 'default':
+            split()
         gnn = buildModel(conv_layer, aggr, alpha, dpb, dpt, **kwargs)
         optimizer = Adam([{
             'params': gnn.emb.parameters(),
@@ -201,7 +208,7 @@ def test(conv_layer=10,
                                           loss_fn=loss_fn)
             else:
                 early_stop += 1
-            if early_stop > 200:
+            if early_stop > patience:
                 break
         vals.append(val_score)
         outs.append(tst_score)
@@ -216,14 +223,18 @@ if __name__ == '__main__':
     args = utils.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    baseG = datasets.load_dataset(args.dataset, args.split)
+    baseG = datasets.load_dataset(args.dataset, args.split, args.split_id)
     baseG.to(device)
     trn_dataset, val_dataset, tst_dataset = None, None, None
     output_channels = baseG.y.unique().shape[0]
 
     loss_fn = nn.CrossEntropyLoss()
-    score_fn = metrics.multiclass_accuracy
-    split()
+    if output_channels <= 2:
+        score_fn = metrics.roc_auc
+    else:
+        score_fn = metrics.multiclass_accuracy
+    
+    split(resplit=args.split != 'default')
 
     if args.test:
         from bestHyperparams import realworld_params

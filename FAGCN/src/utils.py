@@ -5,12 +5,18 @@ import torch
 import random
 import networkx as nx
 import dgl
+import os
 from dgl import DGLGraph
 from dgl.data import *
+from sklearn.metrics import roc_auc_score
 
 
-def preprocess_data(dataset, train_ratio):
-
+def preprocess_data(
+    dataset, 
+    train_ratio, 
+    splits_file_path: str = None, 
+    remove_zero_in_degree_nodes: bool = False
+):
     if dataset in ['cora', 'citeseer', 'pubmed']:
 
         edge = np.loadtxt('../low_freq/{}.edge'.format(dataset), dtype=int).tolist()
@@ -151,7 +157,7 @@ def preprocess_data(dataset, train_ratio):
         train = torch.LongTensor(idx_train)
         val = torch.LongTensor(idx_val)
         test = torch.LongTensor(idx_test)
-        print(dataset, nclass)
+        # print(dataset, nclass)
 
         return g, nclass, features, labels, train, val, test
 
@@ -175,6 +181,20 @@ def preprocess_data(dataset, train_ratio):
                 graph_node_features_dict[int(line[0])] = np.array(line[1].split(','), dtype=np.uint8)
                 graph_labels_dict[int(line[0])] = int(line[2])
 
+
+        if remove_zero_in_degree_nodes:
+            # traverse 
+            valid_ids = []
+            with open(graph_adjacency_list_file_path) as graph_adjacency_list_file:
+                graph_adjacency_list_file.readline()
+                for line in graph_adjacency_list_file:
+                    line = line.rstrip().split('\t')
+                    assert (len(line) == 2)
+                    valid_ids.append(int(line[1]))
+            valid_ids = np.unique(valid_ids)
+        else:
+            valid_ids = np.arange(len(graph_labels_dict))
+
         with open(graph_adjacency_list_file_path) as graph_adjacency_list_file:
             graph_adjacency_list_file.readline()
             for line in graph_adjacency_list_file:
@@ -186,6 +206,8 @@ def preprocess_data(dataset, train_ratio):
                 if int(line[1]) not in G:
                     G.add_node(int(line[1]), features=graph_node_features_dict[int(line[1])],
                                label=graph_labels_dict[int(line[1])])
+                if remove_zero_in_degree_nodes and int(line[0]) not in valid_ids:
+                    continue
                 G.add_edge(int(line[0]), int(line[1]))
 
         adj = nx.adjacency_matrix(G, sorted(G.nodes()))
@@ -200,14 +222,20 @@ def preprocess_data(dataset, train_ratio):
         g = dgl.remove_self_loop(g)
 
         n = len(labels.tolist())
-        idx = [i for i in range(n)]
-        #random.shuffle(idx)
-        r0 = int(n * train_ratio)
-        r1 = int(n * 0.6)
-        r2 = int(n * 0.8)
-        train = np.array(idx[:r0])
-        val = np.array(idx[r1:r2])
-        test = np.array(idx[r2:])
+        idx = list(range(n))
+
+        if splits_file_path:
+            with np.load(splits_file_path) as splits_file:
+                train = np.flatnonzero(splits_file['train_mask'])
+                val = np.flatnonzero(splits_file['val_mask'])
+                test = np.flatnonzero(splits_file['test_mask'])
+        else:
+            r0 = int(n * train_ratio)
+            r1 = int(n * 0.6)
+            r2 = int(n * 0.8)
+            train = np.array(list(filter(lambda x: x in valid_ids, idx[:r0])))
+            val =   np.array(list(filter(lambda x: x in valid_ids, idx[r1:r2])))
+            test =  np.array(list(filter(lambda x: x in valid_ids, idx[r2:])))
 
         nclass = len(set(labels.tolist()))
         features = torch.FloatTensor(features)
@@ -226,8 +254,10 @@ def preprocess_data(dataset, train_ratio):
         labels = np.loadtxt('../high_freq/{}/labels.txt'.format(dataset), dtype=int).tolist()
         features = np.loadtxt('../high_freq/{}/features.txt'.format(dataset), dtype=float)
 
-        U = [e[0] for e in edge]
-        V = [e[1] for e in edge]
+        valid_ids = (np.arange(len(labels)), np.unique(edge[:, 1]))[remove_zero_in_degree_nodes]
+
+        U = [e[0] for e in edge if e[0] in valid_ids]
+        V = [e[1] for e in edge if e[0] in valid_ids]
         g = dgl.graph((U, V))
         g = dgl.to_simple(g)
         g = dgl.to_bidirected(g)
@@ -239,9 +269,9 @@ def preprocess_data(dataset, train_ratio):
         r0 = int(n * train_ratio)
         r1 = int(n * 0.6)
         r2 = int(n * 0.8)
-        train = np.array(idx[:r0])
-        val = np.array(idx[r1:r2])
-        test = np.array(idx[r2:])
+        train = np.array(list(filter(lambda x: x in valid_ids, idx[:r0])))
+        val =   np.array(list(filter(lambda x: x in valid_ids, idx[r1:r2])))
+        test =  np.array(list(filter(lambda x: x in valid_ids, idx[r2:])))
 
         features = normalize_features(features)
         features = torch.FloatTensor(features)
@@ -252,6 +282,42 @@ def preprocess_data(dataset, train_ratio):
         val = torch.LongTensor(val)
         test = torch.LongTensor(test)
         print(dataset, nclass)
+
+        return g, nclass, features, labels, train, val, test
+
+    elif dataset in ['wiki_cooc', 'roman_empire', 'minesweeper', 'questions', 'amazon_ratings', 'workers']:
+        npz_data = np.load(f'../new_data/{dataset}.npz')
+
+        assert splits_file_path is not None
+        split_id = int(splits_file_path)
+
+        edge = npz_data['edges']
+        labels = npz_data['node_labels']
+        features = npz_data['node_features']
+
+        train_mask = npz_data['train_masks'][split_id]
+        val_mask   = npz_data['val_masks'][split_id]
+        test_mask  = npz_data['test_masks'][split_id]
+
+        valid_ids = (np.arange(len(labels)), np.unique(edge[:, 1]))[remove_zero_in_degree_nodes]
+
+        U = [e[0] for e in edge if e[0] in valid_ids]
+        V = [e[1] for e in edge if e[0] in valid_ids]
+        g = dgl.graph((U, V))
+        g = dgl.to_simple(g)
+        g = dgl.to_bidirected(g)
+        g = dgl.remove_self_loop(g)
+
+        train = np.flatnonzero(train_mask)
+        val = np.flatnonzero(val_mask)
+        test = np.flatnonzero(test_mask)
+
+        nclass = len(np.unique(labels))
+        features = torch.FloatTensor(features)
+        labels = torch.LongTensor(labels)
+        train = torch.LongTensor(train)
+        val = torch.LongTensor(val)
+        test = torch.LongTensor(test)
 
         return g, nclass, features, labels, train, val, test
 
@@ -266,9 +332,12 @@ def normalize_features(mx):
     return mx
 
 
-def accuracy(logits, labels):
-    _, indices = torch.max(logits, dim=1)
-    correct = torch.sum(indices == labels)
-    return correct.item() * 1.0 / len(labels)
+@torch.no_grad()
+def accuracy(pr_logits, gt_labels):
+    return (pr_logits.argmax(dim=-1) == gt_labels).float().mean().item()
+
+@torch.no_grad()
+def roc_auc(pr_logits, gt_labels):
+    return roc_auc_score(gt_labels.cpu().numpy(), pr_logits[:, 1].cpu().numpy())   
 
 
