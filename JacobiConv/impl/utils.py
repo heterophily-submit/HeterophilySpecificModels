@@ -41,8 +41,15 @@ def parse_args():
     parser.add_argument('--multilayer', action="store_true")
     parser.add_argument('--resmultilayer', action="store_true")
 
+    parser.add_argument('--lr', type=float, default=0.005)
+    parser.add_argument('--wd', type=float, default=1e-4)
+    parser.add_argument('--alpha', type=float, default=1.0)
+    parser.add_argument('--a', type=float, default=0.0)
+    parser.add_argument('--b', type=float, default=0.0)
+    parser.add_argument('--dpb', type=float, default=0.0)
+    parser.add_argument('--dpt', type=float, default=0.0)
+
     args = parser.parse_args()
-    print("args = ", args)
     return args
 
 def train(optimizer, model, ds, loss_fn):

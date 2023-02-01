@@ -2,25 +2,29 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 
-import torch
-
 import os
-import os.path as osp
+import torch
 import pickle
 import numpy as np
+import os.path as osp
 import torch_geometric.transforms as T
 
 
 from torch.utils.data import Dataset
-from cSBM_dataset import dataset_ContextualSBM
-from torch_geometric.datasets import Planetoid
-from torch_geometric.datasets import Amazon
+from torch_geometric.data import InMemoryDataset, Data
 from torch_geometric.datasets import WikipediaNetwork
 from torch_geometric.datasets import Actor, WebKB
-from torch_geometric.data import InMemoryDataset, download_url, Data
+
+
+DATASET_LIST = [
+    'squirrel_directed', 'chameleon_directed',
+    'squirrel_filtered_directed', 'chameleon_filtered_directed',
+    'roman_empire', 'minesweeper', 'questions', 'amazon_ratings', 'workers', 'sbm_counter'
+]
 
 
 class dataset_heterophily(InMemoryDataset):
+    
     def __init__(self, root='data/', name=None,
                  p2raw=None,
                  train_percent=0.01,
@@ -85,35 +89,23 @@ class dataset_heterophily(InMemoryDataset):
         return '{}()'.format(self.name)
 
 
-def load_custom_data(data_path):
+def load_custom_data(data_path, to_undirected: bool = True):
     npz_data = np.load(data_path)
+    # convert graph to bidirectional
+    if to_undirected:
+        edges = np.concatenate((npz_data['edges'], npz_data['edges'][:, ::-1]), axis=0)
+    else:
+        edges = npz_data['edges']
+    
     data = Data(
         x=torch.from_numpy(npz_data['node_features']),
         y=torch.from_numpy(npz_data['node_labels']),
-        edge_index=torch.from_numpy(npz_data['edges']).T,
+        edge_index=torch.from_numpy(edges).T,
         train_mask=torch.from_numpy(npz_data['train_masks']).T,
         val_mask=torch.from_numpy(npz_data['val_masks']).T,
         test_mask=torch.from_numpy(npz_data['test_masks']).T,
     )
     return data
-
-
-def zero_in_degree_removal(data):
-    edge_index = data.edge_index
-    # keep only with non-zero incoming edges
-    valid_ids = torch.unique(edge_index[1])
-    node_mask = torch.zeros(len(data.y), dtype=torch.bool)
-    node_mask[valid_ids] = True
-    valid_mask = edge_index[0].clone().apply_(lambda x: x in valid_ids).bool()
-    valid_edges = torch.masked_select(data.edge_index, valid_mask).view(2, -1)
-    return Data(
-        x=data.x,
-        y=data.y,
-        edge_index=valid_edges,
-        train_mask=(data.train_mask & node_mask[:, None]),
-        val_mask=(data.val_mask & node_mask[:, None]),
-        test_mask=(data.test_mask & node_mask[:, None]),
-    )
 
 
 class SingleGraphDataset(Dataset):
@@ -134,26 +126,9 @@ class SingleGraphDataset(Dataset):
 
 
 def DataLoader(name):
-    if 'cSBM_data' in name:
-        path = '../data/'
-        dataset = dataset_ContextualSBM(path, name=name)
-    else:
-        name = name.lower()
 
-    if name in ['cora', 'citeseer', 'pubmed']:
-        path = osp.join('../data', name)
-        dataset = Planetoid(path, name, transform=T.NormalizeFeatures())
-    elif name in ['computers', 'photo']:
-        path = osp.join('../data', name)
-        dataset = Amazon(path, name, T.NormalizeFeatures())
-    elif name in ['chameleon', 'chameleon-filtered', 'squirrel', 'squirrel-filtered']:
-
-        if name.endswith('filtered'):
-            name = name.split('-')[0]
-            transform = T.Compose([T.NormalizeFeatures(), zero_in_degree_removal])
-        else:
-            transform = T.NormalizeFeatures()
-
+    if name in ['chameleon', 'squirrel']:
+        transform = T.NormalizeFeatures()
         preProcDs = WikipediaNetwork(root=f"../pyg_data", 
             name=name, geom_gcn_preprocess=False, transform=T.NormalizeFeatures())
         dataset = WikipediaNetwork(root=f"../pyg_data", 
@@ -161,13 +136,12 @@ def DataLoader(name):
         data = dataset[0]
         data.edge_index = preProcDs[0].edge_index
         return dataset, data
-
     elif name in ['film']:
         dataset = Actor(root='../pyg_data/actor', transform=T.NormalizeFeatures())
     elif name in ['texas', 'cornell', 'wisconsin']:
         dataset = WebKB(root='../pyg_data/', name=name, transform=T.NormalizeFeatures())
-    elif name in ['wiki_cooc', 'roman_empire', 'minesweeper', 'questions', 'amazon_ratings', 'workers']:
-        data = load_custom_data(f'../new_data/{name}.npz')
+    elif name in DATASET_LIST:
+        data = load_custom_data(f'../data/{name}.npz', to_undirected='directed' not in name)
         dataset = SingleGraphDataset(data)
         return dataset, data
     else:

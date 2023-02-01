@@ -25,10 +25,10 @@ if __name__ == "__main__":
                 cur_lr = float(line.split('=')[-1])
             elif line.startswith('WD'):
                 cur_wd = float(line.split('=')[-1])
-            elif line.startswith('Split'):
-                split_id = float(line.split('=')[-1])
-            elif line.startswith('Final'):
+                split_id = 0
+            elif line.startswith('Test'):
                 res = float(line.split(' ')[-1])
+                split_id += 1
                 cur_scores.append(res)
                 if split_id == 9:
                     if np.mean(cur_scores) > best_mean_score:

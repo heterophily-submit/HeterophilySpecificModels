@@ -10,6 +10,7 @@
 import argparse
 import numpy as np
 import torch
+import random
 import torch.nn.functional as F
 
 from dataset_utils import DataLoader
@@ -113,6 +114,14 @@ def RunExp(args, dataset, data, Net, split_id):
     return test_metric, best_val_metric, Gamma_0
 
 
+def fix_seed(seed):
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=1000)
@@ -141,6 +150,7 @@ if __name__ == '__main__':
                         type=str, 
                         choices=['GCN', 'GAT', 'APPNP', 'ChebNet', 'JKNet', 'GPRGNN'],
                         default='GPRGNN')
+    parser.add_argument('--seed', type=int, default=42)
 
     args = parser.parse_args()
 
@@ -157,6 +167,8 @@ if __name__ == '__main__':
         Net = GCN_JKNet
     elif gnn_name == 'GPRGNN':
         Net = GPRGNN
+
+    fix_seed(args.seed)
 
     dname = args.dataset
     dataset, data = DataLoader(dname)

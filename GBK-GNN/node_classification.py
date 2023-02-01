@@ -121,7 +121,6 @@ def main():
     experiment_ans = ddt(lambda: [])
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     args.device = device
-    torch.cuda.set_device(args.gpu_id)
     data_name = args.dataset_name
     model_name = args.model_type
     args.dataset = data_loaders.DataLoader(args).dataset

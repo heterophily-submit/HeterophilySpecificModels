@@ -2,11 +2,17 @@
 # load the real-world dataset from the `"BernNet: Learning Arbitrary Graph Spectral Filters via Bernstein Approximation" paper
 import torch
 import numpy as np
-import os.path as osp
-
 import torch_geometric.transforms as T
+
 from torch_geometric.data import Data
-from torch_geometric.datasets import Planetoid, Amazon, WikipediaNetwork, Actor, WebKB
+from torch_geometric.datasets import WikipediaNetwork, Actor, WebKB
+
+
+DATASET_LIST = [
+    'squirrel_directed', 'chameleon_directed',
+    'squirrel_filtered_directed', 'chameleon_filtered_directed',
+    'roman_empire', 'minesweeper', 'questions', 'amazon_ratings', 'workers', 'sbm_counter'
+]
 
 
 def index_to_mask(index, size):
@@ -14,13 +20,14 @@ def index_to_mask(index, size):
     mask[index] = 1
     return mask
 
-
 # GPRGNN
-def random_planetoid_splits(data,
-                            num_classes,
-                            percls_trn=20,
-                            val_lb=500,
-                            Flag=0):
+def random_planetoid_splits(
+    data,
+    num_classes,
+    percls_trn=20,
+    val_lb=500,
+    Flag=0
+):
     indices = []
     for i in range(num_classes):
         index = (data.y == i).nonzero().view(-1)
@@ -49,12 +56,18 @@ def random_planetoid_splits(data,
     return train_mask, val_mask, test_mask
 
 
-def load_custom_data(data_path):
+def load_custom_data(data_path, to_undirected: bool = True):
     npz_data = np.load(data_path)
+    # convert graph to bidirectional
+    if to_undirected:
+        edges = np.concatenate((npz_data['edges'], npz_data['edges'][:, ::-1]), axis=0)
+    else:
+        edges = npz_data['edges']
+    
     data = Data(
         x=torch.from_numpy(npz_data['node_features']),
         y=torch.from_numpy(npz_data['node_labels']),
-        edge_index=torch.from_numpy(npz_data['edges']).T,
+        edge_index=torch.from_numpy(edges).T,
         train_mask=torch.from_numpy(npz_data['train_masks']).T,
         val_mask=torch.from_numpy(npz_data['val_masks']).T,
         test_mask=torch.from_numpy(npz_data['test_masks']).T,
@@ -63,26 +76,17 @@ def load_custom_data(data_path):
 
 
 def DataLoader(name):
-    if name in ['cora', 'citeseer', 'pubmed']:
-        root_path = './'
-        path = osp.join(root_path, 'data', name)
-        dataset = Planetoid(path, name, transform=T.NormalizeFeatures())
-    elif name in ['computers', 'photo']:
-        root_path = './'
-        path = osp.join(root_path, 'data', name)
-        dataset = Amazon(path, name, T.NormalizeFeatures())
-    
-    elif name == 'actor':
+    if name == 'actor':
         return Actor(root='./data/actor', transform=T.NormalizeFeatures())
-    elif name == 'squirrel':
+    if name == 'squirrel':
         return WikipediaNetwork(root='./data', name='squirrel', transform=T.NormalizeFeatures())
-    elif name == 'chameleon':
+    if name == 'chameleon':
         return WikipediaNetwork(root='./data', name='chameleon', transform=T.NormalizeFeatures())
-    elif name in ['cornell', 'texas', 'wisconsin']:
+    if name in ['cornell', 'texas', 'wisconsin']:
         return WebKB(root='./data/',  name=name, transform=T.NormalizeFeatures())
-    elif name in ['wiki_cooc', 'roman_empire', 'minesweeper', 'questions', 'amazon_ratings', 'squirrel_filtered', 'chameleon_filtered', 'workers']:
-        root_path = './new_data'
-        dataset = load_custom_data(f'{root_path}/{name}.npz')
+    if name in DATASET_LIST:
+        root_path = './data'
+        dataset = load_custom_data(f'{root_path}/{name}.npz', to_undirected='directed' not in name)
     else:
         raise ValueError(f'dataset {name} not supported in dataloader')
 

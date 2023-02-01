@@ -1,5 +1,6 @@
 import os
 import time
+import random
 import argparse
 import numpy as np
 import torch
@@ -14,7 +15,12 @@ from model import FAGCN
 import warnings
 warnings.simplefilter('ignore')
 
-# torch.cuda.set_device(0)
+def fix_seed(seed):
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', default='new_squirrel')
@@ -29,7 +35,10 @@ parser.add_argument('--train_ratio', type=float, default=0.6, help='Ratio of tra
 parser.add_argument('--patience', type=int, default=200, help='Patience')
 parser.add_argument('--remove_zero_in_degree_nodes', action='store_true')
 parser.add_argument('--splits_file_path', type=str, default='')
+parser.add_argument('--seed', type=int, default=42)
 args = parser.parse_args()
+
+fix_seed(args.seed)
 
 device = 'cuda'
 
@@ -86,8 +95,6 @@ for epoch in range(args.epochs):
     val_metric = metric(logp[val], labels[val])
     los.append([epoch, loss_val, val_metric, test_metric])
 
-    # print(f'[Accuracy] Train:{train_metric:.3f} Val:{val_metric:.3f} Test:{test_metric:.3f}')
-
     if max_metric < val_metric:
         max_metric = val_metric
         counter = 0
@@ -100,7 +107,6 @@ for epoch in range(args.epochs):
 
     if epoch >= 3:
         dur.append(time.time() - t0)
-
 
 if args.dataset in ['cora', 'citeseer', 'pubmed'] or 'syn' in args.dataset:
     los.sort(key=lambda x: x[1])

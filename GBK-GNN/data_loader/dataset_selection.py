@@ -8,12 +8,26 @@ from utils.transform import zero_in_degree_removal
 from utils.statistic import compute_smoothness, split_dataset
 
 
-def load_custom_data(data_path):
+DATASET_LIST = [
+    'squirrel_directed', 'chameleon_directed',
+    'squirrel_filtered_directed', 'chameleon_filtered_directed',
+    'squirrel_filtered', 'chameleon_filtered',
+    'roman_empire', 'minesweeper', 'questions', 'amazon_ratings', 'workers'
+]
+
+
+def load_custom_data(data_path, to_undirected: bool = True):
     npz_data = np.load(data_path)
+    # convert graph to bidirectional
+    if to_undirected:
+        edges = np.concatenate((npz_data['edges'], npz_data['edges'][:, ::-1]), axis=0)
+    else:
+        edges = npz_data['edges']
+    
     data = Data(
         x=torch.from_numpy(npz_data['node_features']),
         y=torch.from_numpy(npz_data['node_labels']),
-        edge_index=torch.from_numpy(npz_data['edges']).T,
+        edge_index=torch.from_numpy(edges).T,
         train_mask=torch.from_numpy(npz_data['train_masks']).T,
         val_mask=torch.from_numpy(npz_data['val_masks']).T,
         test_mask=torch.from_numpy(npz_data['test_masks']).T,
@@ -21,17 +35,20 @@ def load_custom_data(data_path):
     return [data]
 
 
-def get_dataset(dataset_name, transform):
-    if dataset_name == 'actor':
-        return Actor(root='./data/actor', transform=transform)
-    if dataset_name == 'squirrel':
-        return WikipediaNetwork(root='./data', name='squirrel', transform=transform)
-    if dataset_name == 'chameleon':
-        return WikipediaNetwork(root='./data', name='chameleon', transform=transform)
-    if dataset_name in ['cornell', 'texas', 'wisconsin']:
-        return WebKB(root='./data', name=dataset_name, transform=transform)
-    if dataset_name in ['wiki_cooc', 'roman_empire', 'minesweeper', 'questions', 'amazon_ratings', 'workers']:
-        return load_custom_data(f'./new_data/{dataset_name}.npz')
+def get_dataset(dataset):
+    if dataset == 'actor':
+        return Actor(root='./pyg_data/actor')
+    if dataset == 'squirrel':
+        return WikipediaNetwork(root='./pyg_data', name='squirrel')
+    if dataset == 'chameleon':
+        return WikipediaNetwork(root='./pyg_data', name='chameleon')
+    if dataset in ['cornell', 'texas', 'wisconsin']:
+        return WebKB(root='./pyg_data', name=dataset)
+    if dataset in DATASET_LIST:
+        return load_custom_data(
+            f'./data/{dataset}.npz', 
+            to_undirected='directed' not in dataset
+        )
     raise ValueError("Unknown dataset")
 
 
@@ -48,13 +65,8 @@ class DatasetSelection:
             "EdgeClasification": "edge_",
             "GraphClasification": "graph_"
         }
-
-        if remove_zero_degree_nodes:
-            transform = zero_in_degree_removal
-        else:
-            transform = None
-
-        dataset = get_dataset(dataset_name, transform=transform)      
+     
+        dataset = get_dataset(dataset_name)      
 
         self.dataset = {"graph": []}
         smoothness = num_class = num_node = num_edge = 0
