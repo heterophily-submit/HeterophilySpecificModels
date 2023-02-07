@@ -1,36 +1,34 @@
-from multiprocessing import cpu_count
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
 import torch.optim as optim
-from torch.nn.parameter import Parameter
 import math
 import numpy as np
 import scipy.sparse as sp
 import time
 import argparse
-import sys
-import pickle as pkl
 import networkx as nx
-from collections import defaultdict
 import os
 import json
 import warnings
+
+from copy import deepcopy
+from collections import defaultdict
+from torch.nn.parameter import Parameter
 from sklearn.metrics import roc_auc_score
 
 warnings.filterwarnings('ignore')
 
+
 torch.set_default_dtype(torch.float64)
 
 
-cpu_num = int(cpu_count() * 0.95)
-os.environ['OMP_NUM_THREADS'] = str(cpu_num)
-os.environ['OPENBLAS_NUM_THREADS'] = str(cpu_num)
-os.environ['MKL_NUM_THREADS'] = str(cpu_num)
-os.environ['VECLIB_MAXIMUM_THREADS'] = str(cpu_num)
-os.environ['NUMEXPR_NUM_THREADS'] = str(cpu_num)
-torch.set_num_threads(cpu_num)
+DATASET_LIST = [
+    'squirrel_directed', 'chameleon_directed',
+    'squirrel_filtered_directed', 'chameleon_filtered_directed',
+    'roman_empire', 'minesweeper', 'questions', 'amazon_ratings', 'workers', 'sbm_counter'
+]
 
 
 class GraphConvolution(nn.Module):
@@ -42,9 +40,9 @@ class GraphConvolution(nn.Module):
         super(GraphConvolution, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.weight = Parameter(torch.FloatTensor(in_features, out_features))
+        self.weight = Parameter(torch.DoubleTensor(in_features, out_features))
         if bias:
-            self.bias = Parameter(torch.FloatTensor(out_features))
+            self.bias = Parameter(torch.DoubleTensor(out_features))
         else:
             self.register_parameter('bias', None)
         self.reset_parameters()
@@ -85,6 +83,7 @@ class GCN(nn.Module):
 
 
 class MLP_NORM(nn.Module):
+
     def __init__(self, nnodes, nfeat, nhid, nclass, dropout, alpha, beta, gamma, delta, norm_func_id, norm_layers, orders, orders_func_id, cuda):
         super(MLP_NORM, self).__init__()
         self.fc1 = nn.Linear(nfeat, nhid)
@@ -183,6 +182,7 @@ class MLP_NORM(nn.Module):
         return res
 
     def norm_func2(self, x, h0, adj):
+   
         coe = 1.0 / (self.alpha + self.beta)
         coe1 = 1 - self.gamma
         coe2 = 1.0 / coe1
@@ -201,6 +201,8 @@ class MLP_NORM(nn.Module):
         # calculate z
         xx = torch.mm(x, x.t())
         hx = torch.mm(h0, x.t())
+        # print('adj', adj.shape)
+        # print('orders_weight', self.orders_weight[0].shape)
         adj = adj.to_dense()
         adjk = adj
         a_sum = adjk * self.orders_weight[0]
@@ -209,7 +211,8 @@ class MLP_NORM(nn.Module):
             a_sum += adjk * self.orders_weight[i]
         z = torch.mm(coe1 * xx + self.beta * a_sum - self.gamma * coe1 * hx,
                      torch.inverse(coe1 * coe1 * xx + (self.alpha + self.beta) * self.nodes_eye))
-
+        # print(z.shape)
+        # print(z)
         return res
 
     def order_func1(self, x, res, adj):
@@ -265,7 +268,7 @@ def normalize(mx):
 
 @torch.no_grad()
 def accuracy(pr_logits, gt_labels):
-    return (pr_logits.argmax(dim=-1) == gt_labels).float().mean().item()
+    return (pr_logits.argmax(dim=-1) == gt_labels).float().mean()
 
 @torch.no_grad()
 def roc_auc(pr_logits, gt_labels):
@@ -279,7 +282,7 @@ def sparse_mx_to_torch_sparse_tensor(sparse_mx):
         np.vstack((sparse_mx.row, sparse_mx.col)).astype(np.int64))
     values = torch.from_numpy(sparse_mx.data)
     shape = torch.Size(sparse_mx.shape)
-    return torch.sparse.FloatTensor(indices, values, shape)
+    return torch.sparse.DoubleTensor(indices, values, shape)
 
 
 # Read split data
@@ -291,7 +294,7 @@ def parse_index_file(filename):
     return index
 
 
-def load_data_new(dataset_str, split, remove_zero_in_degree_nodes: bool = False):
+def load_data_new(dataset_str, split):
     """
     Loads input data from gcn/data directory
 
@@ -311,76 +314,13 @@ def load_data_new(dataset_str, split, remove_zero_in_degree_nodes: bool = False)
     :param dataset_str: Dataset name
     :return: All data input files loaded (as well the training/test data).
     """
-
-    if dataset_str in ['citeseer', 'cora', 'pubmed']:
-        names = ['x', 'y', 'tx', 'ty', 'allx', 'ally', 'graph']
-        objects = []
-        for i in range(len(names)):
-            with open("data/ind.{}.{}".format(dataset_str, names[i]), 'rb') as f:
-                if sys.version_info > (3, 0):
-                    objects.append(pkl.load(f, encoding='latin1'))
-                else:
-                    objects.append(pkl.load(f))
-
-        x, y, tx, ty, allx, ally, graph = tuple(objects)
-        test_idx_reorder = parse_index_file(
-            "data/ind.{}.test.index".format(dataset_str))
-        test_idx_range = np.sort(test_idx_reorder)
-
-        if dataset_str == 'citeseer':
-            # Fix citeseer dataset (there are some isolated nodes in the graph)
-            # Find isolated nodes, add them as zero-vecs into the right position
-            test_idx_range_full = range(
-                min(test_idx_reorder), max(test_idx_reorder)+1)
-            tx_extended = sp.lil_matrix((len(test_idx_range_full), x.shape[1]))
-            tx_extended[test_idx_range-min(test_idx_range), :] = tx
-            tx = tx_extended
-            ty_extended = np.zeros((len(test_idx_range_full), y.shape[1]))
-            ty_extended[test_idx_range-min(test_idx_range), :] = ty
-            ty = ty_extended
-
-        features = sp.vstack((allx, tx)).tolil()
-        features[test_idx_reorder, :] = features[test_idx_range, :]
-        adj = nx.adjacency_matrix(nx.from_dict_of_lists(graph))
-
-        labels = np.vstack((ally, ty))
-        labels[test_idx_reorder, :] = labels[test_idx_range, :]
-
-        splits_file_path = 'splits/' + dataset_str + \
-            '_split_0.6_0.2_' + str(split) + '.npz'
-
-        with np.load(splits_file_path) as splits_file:
-            train_mask = splits_file['train_mask']
-            val_mask = splits_file['val_mask']
-            test_mask = splits_file['test_mask']
-
-        idx_train = list(np.where(train_mask == 1)[0])
-        idx_val = list(np.where(val_mask == 1)[0])
-        idx_test = list(np.where(test_mask == 1)[0])
-
-        no_label_nodes = []
-        if dataset_str == 'citeseer':  # citeseer has some data with no label
-            for i in range(len(labels)):
-                if sum(labels[i]) < 1:
-                    labels[i][0] = 1
-                    no_label_nodes.append(i)
-
-            for n in no_label_nodes:  # remove unlabel nodes from train/val/test
-                if n in idx_train:
-                    idx_train.remove(n)
-                if n in idx_val:
-                    idx_val.remove(n)
-                if n in idx_test:
-                    idx_test.remove(n)
-
-    elif dataset_str in ['chameleon', 'cornell', 'film', 'squirrel', 'texas', 'wisconsin']:
+ 
+    if dataset_str in ['chameleon', 'cornell', 'film', 'squirrel', 'texas', 'wisconsin']:
         graph_adjacency_list_file_path = os.path.join(
             'new_data', dataset_str, 'out1_graph_edges.txt')
         graph_node_features_and_labels_file_path = os.path.join('new_data', dataset_str,
                                                                 f'out1_node_feature_label.txt')
         graph_dict = defaultdict(list)
-
-        valid_ids = []
         with open(graph_adjacency_list_file_path) as graph_adjacency_list_file:
             graph_adjacency_list_file.readline()
             for line in graph_adjacency_list_file:
@@ -388,20 +328,10 @@ def load_data_new(dataset_str, split, remove_zero_in_degree_nodes: bool = False)
                 assert (len(line) == 2)
                 graph_dict[int(line[0])].append(int(line[1]))
                 graph_dict[int(line[1])].append(int(line[0]))
-                valid_ids.append(int(line[1]))
-        
-        # get unique ids
-        valid_ids = np.unique(valid_ids)
 
-        # filter graph
-        preproc_fn = (
-            lambda x: x, 
-            lambda x: list(filter(lambda v: v in valid_ids, x))
-        )[remove_zero_in_degree_nodes]
-        
         graph_dict_ordered = defaultdict(list)
         for key in sorted(graph_dict):
-            graph_dict_ordered[key] = preproc_fn(graph_dict[key])
+            graph_dict_ordered[key] = graph_dict[key]
             graph_dict_ordered[key].sort()
 
         adj = nx.adjacency_matrix(nx.from_dict_of_lists(graph_dict_ordered))
@@ -447,9 +377,6 @@ def load_data_new(dataset_str, split, remove_zero_in_degree_nodes: bool = False)
         label_classes = max(labels_list) + 1
         labels = np.eye(label_classes)[labels_list]
 
-        if len(labels.shape) == 2:
-            labels = labels.argmax(axis=-1)
-
         splits_file_path = 'splits/' + dataset_str + \
             '_split_0.6_0.2_' + str(split) + '.npz'
 
@@ -458,20 +385,18 @@ def load_data_new(dataset_str, split, remove_zero_in_degree_nodes: bool = False)
             val_mask = splits_file['val_mask']
             test_mask = splits_file['test_mask']
 
-        if remove_zero_in_degree_nodes:
-            valid_mask = np.zeros_like(train_mask)
-            valid_mask[valid_ids] = 1
+        idx_train = np.where(train_mask == 1)[0]
+        idx_val = np.where(val_mask == 1)[0]
+        idx_test = np.where(test_mask == 1)[0]
+
+    elif dataset_str in DATASET_LIST:
+        npz_data = np.load(f'data/{dataset_str}.npz')
+
+        if 'directed' not in dataset_str:
+            edge = np.concatenate((npz_data['edges'], npz_data['edges'][:, ::-1]), axis=0)
         else:
-            valid_mask = np.ones_like(train_mask)
+            edge = npz_data['edges']
 
-        idx_train = np.where(train_mask & valid_mask == 1)[0]
-        idx_val = np.where(val_mask & valid_mask == 1)[0]
-        idx_test = np.where(test_mask & valid_mask == 1)[0]
-
-    elif dataset_str in ['wiki_cooc', 'roman_empire', 'minesweeper', 'questions', 'amazon_ratings', 'workers']:
-        npz_data = np.load(f'new_data/{dataset_str}.npz')
-
-        edge = npz_data['edges']
         labels = npz_data['node_labels']
         features = npz_data['node_features']
 
@@ -490,19 +415,20 @@ def load_data_new(dataset_str, split, remove_zero_in_degree_nodes: bool = False)
 
     features = normalize(features)
     if isinstance(features, np.ndarray):
-        features = torch.FloatTensor(features)
+        features = torch.DoubleTensor(features)
     else:
-        features = torch.FloatTensor(np.array(features.todense()))
-    if isinstance(labels, np.ndarray):
-        labels = torch.LongTensor(labels)
+        features = torch.DoubleTensor(np.array(features.todense()))
+
+    if len(labels.shape) == 1:
+        labels = torch.from_numpy(labels).long()
     else:
-        labels = torch.LongTensor(np.where(labels))[1]
+        labels = torch.from_numpy(labels).long().argmax(dim=-1)
+    
     idx_train = torch.LongTensor(idx_train)
     idx_val = torch.LongTensor(idx_val)
     idx_test = torch.LongTensor(idx_test)
 
     return adj, features, labels, idx_train, idx_val, idx_test
-
 
 
 # Training settings
@@ -546,9 +472,6 @@ parser.add_argument('--orders_func_id', type=int, default=3,
                     help='Sum function of adj orders in norm layer, ids \in [1, 2, 3]')
 parser.add_argument('--norm_func_id', type=int, default=2,
                     help='Function of norm layer, ids \in [1, 2]')
-#
-parser.add_argument('--remove_zero_in_degree_nodes', action='store_true', default=False,
-                    help='Whether to remove zero_in_degree_nodes.')         
 
 
 args = parser.parse_args()
@@ -561,13 +484,11 @@ if args.cuda:
 
 # Load data
 adj, features, labels, idx_train, idx_val, idx_test = load_data_new(
-    args.dataset, args.split, args.remove_zero_in_degree_nodes)
-
+    args.dataset, args.split)
 
 # Change data type to float
 features = features.to(torch.float64)
 adj = adj.to(torch.float64)
-
 # Model and optimizer
 
 if args.model == 'gcn':
@@ -603,7 +524,6 @@ if args.cuda:
     idx_val = idx_val.cuda()
     idx_test = idx_test.cuda()
 
-
 # Train model
 t_total = time.time()
 
@@ -613,6 +533,8 @@ metric = accuracy if num_labels > 2 else roc_auc
 
 best_metric = 0
 patience = 0
+
+best_params = None
 
 for epoch in range(args.epochs):
     t = time.time()
@@ -631,10 +553,21 @@ for epoch in range(args.epochs):
         output = model(features, adj)
 
     loss_val = F.nll_loss(output[idx_val], labels[idx_val])
-    metric_val = metric(output[idx_val], labels[idx_val])
-
+    try:
+        metric_val = metric(output[idx_val], labels[idx_val])
+    except:
+        break
+    # print(
+    #     'Epoch: {:04d}'.format(epoch+1),
+    #     'loss_train: {:.4f}'.format(loss_train.item()),
+    #     'metric_train: {:.4f}'.format(metric_train.item()),
+    #     'loss_val: {:.4f}'.format(loss_val.item()),
+    #     'metric_val: {:.4f}'.format(metric_val.item()),
+    #     'time: {:.4f}s'.format(time.time() - t)
+    # )
     if metric_val > best_metric:
         best_metric = metric_val
+        best_params = deepcopy(model.state_dict())
         patience = 0
     else:
         patience += 1
@@ -646,7 +579,8 @@ outfile_name = f"{args.dataset}_lr{args.lr}_do{args.dropout}_es{args.early_stopp
     f"wd{args.weight_decay}_alpha{args.alpha}_beta{args.beta}_gamma{args.gamma}_" +\
     f"delta{args.delta}_nlid{args.norm_func_id}_nl{args.norm_layers}_" +\
     f"ordersid{args.orders_func_id}_orders{args.orders}_split{args.split}_results.txt"
-
+# load best params
+model.load_state_dict(best_params)
 # Testing
 model.eval()
 output = model(features, adj)
@@ -654,14 +588,13 @@ loss_test = F.nll_loss(output[idx_test], labels[idx_test])
 metric_test = metric(output[idx_test], labels[idx_test])
 print("Test set results:",
       "loss= {:.4f}".format(loss_test.item()),
-      "accuracy= {:.4f}".format(metric_test))
+      "metric= {:.4f}".format(metric_test.item()))
 
 test_time = time.time()
 results_dict = {}
 results_dict['test_cost'] = float(loss_test.item())
-results_dict['test_acc'] = float(metric_test)
+results_dict['test_acc'] = float(metric_test.item())
 results_dict['test_duration'] = time.time()-test_time
 
-os.makedirs('runs', exist_ok=True)
 with open(os.path.join('runs', outfile_name), 'w') as outfile:
     outfile.write(json.dumps(results_dict))

@@ -1,27 +1,30 @@
 #!/bin/bash
 
-for DATASET in <dataset_name>
+export OMP_NUM_THREADS=8
+
+for DATASET in chameleon_directed chameleon_filtered_directed squirrel_directed squirrel_filtered_directed roman_empire minesweeper questions amazon_ratings workers
 do
-    for LR in 1e-3 3e-3 1e-2 3e-2 1e-1
+    echo "DATASET=${DATASET}"
+    for LR in 0.001 0.003 0.01 0.03 0.1
     do
-        echo "LR: ${LR}"
-        echo "LR: ${LR}" >> ${DATASET}.txt
-        for WEIGHT_DECAY in 1e-4 1e-3 1e-2
+        echo "LR=${LR}"
+        echo "LR=${LR}" >> results/${DATASET}.txt
+        for WD in 0.0 1e-5 1e-4 1e-3
         do
-            echo "LR: ${WEIGHT_DECAY}"
-            echo "LR: ${WEIGHT_DECAY}" >> ${DATASET}.txt
+            echo "WD=${WD}"
+            echo "WD=${WD}" >> results/${DATASET}.txt
             for SPLIT_ID in $( seq 0 9 )
-                do
-                echo "Split: $SPLIT_ID"
-                echo "Split: $SPLIT_ID"  >> ${DATASET}.txt
+            do
+                echo "Split=${SPLIT_ID}"
+                echo "Split=${SPLIT_ID}" >> results/${DATASET}.txt
                 python node_classification.py \
                     --model_type GraphSage \
                     --dataset_name ${DATASET} \
                     --lamda 30 \
-                    --weight_decay ${WEIGHT_DECAY} \
+                    --weight_decay ${WD} \
                     --lr ${LR} \
                     --log_interval 1000 \
-                    --split_id ${SPLIT_ID} >> ${DATASET}.txt
+                    --split_id ${SPLIT_ID} >> results/${DATASET}.txt
             done
         done
     done

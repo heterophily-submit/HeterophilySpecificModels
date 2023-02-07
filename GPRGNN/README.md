@@ -1,6 +1,6 @@
 # GPRGNN
 
-This is the source code for our ICLR2021 paper: [Adaptive Universal Generalized PageRank Graph Neural Network](https://openreview.net/forum?id=n6jl7fLxrP). (See also our [ArXiv version](https://arxiv.org/pdf/2006.07988.pdf) for the latest update on typos) 
+This is the modified version of the source code for our ICLR2021 paper: [Adaptive Universal Generalized PageRank Graph Neural Network](https://openreview.net/forum?id=n6jl7fLxrP). (See also the [ArXiv version](https://arxiv.org/pdf/2006.07988.pdf) for the latest update on typos) 
 
 
 <p align="center">
@@ -17,7 +17,7 @@ The learnt GPR weights of the GPR-GNN on real world datasets. Cora is homophilic
   <img src="https://github.com/jianhao2016/GPRGNN/blob/master/figs/Different_gamma_upated_H.png" width="600">
 </p>
 
-# Requirement:
+# Requirements:
 ```
 pytorch
 pytorch-geometric
@@ -26,15 +26,12 @@ numpy
 
 # Usage
 
-## Data preparation
+### Data preparation
 
-Data from pytorch-geometric will be downloaded to `./pyg_data` directory
-or can be copied there via symbolic link
-
-For new datasets make symbolic link to the root in a following way:
+Create a symbolic or copy to the network directory, i.e `.../GPRGNN/data`
 
 ```
-ln -s <DATA_DIR> new_data
+ln -s <DATA_DIR> data
 ```
 
 ## Experiment running
@@ -43,9 +40,11 @@ In order to launch experiments run `./Reproduce_GPRGNN.sh` in the `src` director
 
 To setup the experiment edit `Reproduce_GPRGNN.sh`.
 
+To compute averaged stats use `parse_results.py` with --result_path `<path_to_experiments>`.
+
 
 # Citation
-Please cite our paper if you use this code in your own work:
+Please cite the paper if you use this code in your own work:
 ```latex
 @inproceedings{
 chien2021adaptive,

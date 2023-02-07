@@ -1,9 +1,11 @@
 import torch
-from torch_geometric.utils import is_undirected, to_undirected
 import dataset_utils as du
 import os
-import dataset_image
+import torch_geometric.transforms as T
+
 from torch import Tensor, LongTensor
+from torch_geometric.utils import is_undirected, to_undirected
+from torch_geometric.datasets import WikipediaNetwork, Actor, WebKB
 
 
 class BaseGraph:
@@ -83,18 +85,10 @@ def load_dataset(name: str, split_t="dense", split_id: int = 0):
     '''
     load dataset into a base graph format.
     '''
-    savepath = f"./data/{name}.pt"
-    if name in [
-            'cora', 'citeseer', 'pubmed', 'computers', 'photo', 'texas',
-            'cornell', 'chameleon', 'actor', 'squirrel', 'wisconsin',
-            'wiki_cooc', 'roman_empire', 'minesweeper', 'questions', 
-            'amazon_ratings', 'squirrel_filtered', 'chameleon_filtered'
-    ]:
+    savepath = f"./pyg_data/{name}.pt"
+    if name in du.DATASET_LIST:
         if os.path.exists(savepath):
             pass
-            # bg = torch.load(savepath, map_location="cpu")
-            # bg.mask = split(bg, split=split_t)
-            # return bg
         ds = du.DataLoader(name)
         data = ds[0]
         if isinstance(ds, list):
@@ -109,15 +103,6 @@ def load_dataset(name: str, split_t="dense", split_id: int = 0):
         bg = BaseGraph(x, ei, ea, y, mask)
         bg.num_classes = data.num_classes
         bg.y = bg.y.to(torch.int64)
-        torch.save(bg, savepath)
-        return bg
-    elif name in ['low', 'high', 'band', 'rejection', 'comb', 'low_band']:
-        if os.path.exists(savepath):
-            bg = torch.load(savepath, map_location="cpu")
-            return bg
-        x, y, ei, ea, mask = dataset_image.load_img(name)
-        mask = mask.flatten()
-        bg = BaseGraph(x, ei, ea, y, mask)
         torch.save(bg, savepath)
         return bg
     else:

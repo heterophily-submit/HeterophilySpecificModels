@@ -1,7 +1,6 @@
 import argparse
 import numpy as np
 
-from collections import defaultdict
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -16,16 +15,27 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
 
-    current_split = 0
-    best_res_for_split = defaultdict(float)
+    best_mean_score = 0
+    cur_lr, cur_wd, cur_scores = None, None, []
+    best_lr, best_wd, best_scores = None, None, []
+  
     with open(args.result_path, 'r') as f:
         for line in f:
-            if line.startswith('load'):
-                current_split = int(line.split(':')[-1].lstrip(' '))
+            if line.startswith('LR'):
+                cur_lr = float(line.split('=')[-1])
+            elif line.startswith('WD'):
+                cur_wd = float(line.split('=')[-1])
+            elif line.startswith('Split'):
+                split_id = float(line.split('=')[-1])
             elif line.startswith('Final'):
-                res = float(line.split(':')[-1])
-                if res > best_res_for_split[current_split]:
-                    best_res_for_split[current_split] = res
+                res = float(line.split(' ')[-1])
+                cur_scores.append(res)
+                if split_id == 9:
+                    if np.mean(cur_scores) > best_mean_score:
+                        best_mean_score = np.mean(cur_scores)
+                        best_scores = cur_scores
+                    cur_scores = []
     
-    all_results = [v for _, v in best_res_for_split.items()]
-    print(f'{100 * np.mean(all_results):.2f} +- {100 * np.std(all_results):.2f}')
+    print(f'{100 * np.mean(best_scores):.2f} +- {100 * np.std(best_scores):.2f}')
+
+            

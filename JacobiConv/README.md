@@ -1,6 +1,6 @@
 # How Powerful are Spectral Graph Neural Networks
 
-This repository is the official implementation of the model in the [following paper](https://arxiv.org/abs/2205.11172v1):
+This repository is based on the official implementation of the model in the [following paper](https://arxiv.org/abs/2205.11172v1):
 
 Xiyuan Wang, Muhan Zhang: How Powerful are Spectral Graph Neural Networks. ICML 2022
 
@@ -32,13 +32,10 @@ seaborn               0.12.0
 
 #### Data preparation
 
-Data from pytorch-geometric will be downloaded to `./data` directory
-or can be copied there via symbolic link
-
-For new datasets make symbolic link to the root in a following way:
+Create a symbolic or copy to the network directory, i.e `.../JacobiConv/data`
 
 ```
-ln -s <DATA_DIR> new_data
+ln -s <DATA_DIR> data
 ```
 
 #### Experiment running

@@ -9,21 +9,17 @@ Requirements are given in `requirements.txt`
 
 ### Data preparation
 
-Due to the lack of space we do not copy the saved features for FAGCN. 
-Please refer to the original repository `https://github.com/bdy9527/FAGCN` and download and 
-extract the [archived features](https://github.com/bdy9527/FAGCN/blob/main/FAGCN.zip).
-
-For new datasets make symbolic link to the root in a following way:
+Create a symbolic or copy to the network directory, i.e `.../FAGCN/data`
 
 ```
-ln -s <DATA_DIR> new_data
+ln -s <DATA_DIR> data
 ```
 
 ### Experiments
 
-In order to launch experiments run `run_train.sh` in `src` directory.
+In order to launch experiments run `run_train.sh` in `src` directory, specifying  visible `CUDA DEVICES` if necessary.
 
-To compute averaged stats use `parse_results.py` with --result_path `<path_to_experiments>`.
+To compute averaged stats use `src/parse_results.py` with --result_path `<path_to_experiments>`.
 
 # Reference
 If you make advantage of the FAGCN model in your research, please cite the following in your manuscript:

@@ -1,28 +1,59 @@
 #!/bin/bash
 
-for DATASET in <dataset_name>
+export OMP_NUM_THREADS=8
+
+for DATASET in chameleon_directed chameleon_filtered_directed
 do
-    for LR in 1e-3 3e-3 1e-2 3e-2 1e-1
+    echo "DATASET=${DATASET}"
+    for LR in 0.001 0.003 0.01 0.02 0.04
     do
-        for WD in 1e-4 1e-3 1e-2
+        echo "LR=${LR}"
+        echo "LR=${LR}" >> results/${DATASET}.txt
+        for WD in 0.0 1e-5 3e-5 1e-4 3e-4
         do
-            for NUM_LAYERS in 3
-            do
-                python train_fsgnn.py \
-                    --seed 42 \
-                    --steps 1500 \
-                    --log-freq 100 \
-                    --num-layers ${NUM_LAYERS} \
-                    --hidden-dim 64 \
-                    --patience 100 \
-                    --dataset ${DATASET} \
-                    --layer-norm 1 \
-                    --lr ${LR} \
-                    --weight-decay ${WD} \
-                    --dropout 0.0 \
-                    --transform \
-                    --feat-type all
-            done
+            echo "WD=${WD}"
+            echo "WD=${WD}" >> results/${DATASET}.txt
+            python train_fsgnn.py \
+                --seed 42 \
+                --steps 1500 \
+                --log-freq 100 \
+                --num-layers 3 \
+                --hidden-dim 64 \
+                --patience 100 \
+                --dataset ${DATASET} \
+                --layer-norm 1 \
+                --lr ${LR} \
+                --weight-decay ${WD} \
+                --dropout 0.5 \
+                --feat-type all >> results/${DATASET}.txt
+        done
+    done
+done
+
+for DATASET in squirrel_directed squirrel_filtered_directed roman_empire minesweeper questions amazon_ratings workers
+do
+    echo "DATASET=${DATASET}"
+    for LR in 0.001 0.003 0.01 0.02 0.04
+    do
+        echo "LR=${LR}"
+        echo "LR=${LR}" >> results/${DATASET}.txt
+        for WD in 0.0 1e-5 3e-5 1e-4 3e-4
+        do
+            echo "WD=${WD}"
+            echo "WD=${WD}" >> results/${DATASET}.txt
+            python train_fsgnn.py \
+                --seed 42 \
+                --steps 1500 \
+                --log-freq 100 \
+                --num-layers 3 \
+                --hidden-dim 64 \
+                --patience 100 \
+                --dataset ${DATASET} \
+                --layer-norm 1 \
+                --lr ${LR} \
+                --weight-decay ${WD} \
+                --dropout 0.7 \
+                --feat-type all >> results/${DATASET}.txt
         done
     done
 done

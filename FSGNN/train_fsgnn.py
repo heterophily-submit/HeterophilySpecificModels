@@ -1,4 +1,3 @@
-from enum import unique
 import torch
 import random
 import argparse
@@ -15,12 +14,25 @@ from torch_geometric.data import Data
 from torch_geometric.datasets import Actor, WikipediaNetwork, WebKB
 
 
-def load_custom_data(data_path):
+DATASET_LIST = [
+    'squirrel_directed', 'chameleon_directed',
+    'squirrel_filtered_directed', 'chameleon_filtered_directed',
+    'roman_empire', 'minesweeper', 'questions', 'amazon_ratings', 'workers'
+]
+
+
+def load_custom_data(data_path, to_undirected: bool = True):
     npz_data = np.load(data_path)
+    # convert graph to bidirectional
+    if to_undirected:
+        edges = np.concatenate((npz_data['edges'], npz_data['edges'][:, ::-1]), axis=0)
+    else:
+        edges = npz_data['edges']
+    
     data = Data(
         x=torch.from_numpy(npz_data['node_features']),
         y=torch.from_numpy(npz_data['node_labels']),
-        edge_index=torch.from_numpy(npz_data['edges']).T,
+        edge_index=torch.from_numpy(edges).T,
         train_mask=torch.from_numpy(npz_data['train_masks']).T,
         val_mask=torch.from_numpy(npz_data['val_masks']).T,
         test_mask=torch.from_numpy(npz_data['test_masks']).T,
@@ -28,17 +40,20 @@ def load_custom_data(data_path):
     return [data]
 
 
-def get_dataset(args, transform):
+def get_dataset(args):
     if args.dataset == 'actor':
-        return Actor(root='./data/actor', transform=transform)
+        return Actor(root='./pyg_data/actor')
     if args.dataset == 'squirrel':
-        return WikipediaNetwork(root='./data', name='squirrel', transform=transform)
+        return WikipediaNetwork(root='./pyg_data', name='squirrel')
     if args.dataset == 'chameleon':
-        return WikipediaNetwork(root='./data', name='chameleon', transform=transform)
+        return WikipediaNetwork(root='./pyg_data', name='chameleon')
     if args.dataset in ['cornell', 'texas', 'wisconsin']:
-        return WebKB(root='./data', name=args.dataset, transform=transform)
-    if args.dataset in ['wiki_cooc', 'roman_empire', 'minesweeper', 'questions', 'amazon_ratings', 'workers']:
-        return load_custom_data(f'./new_data/{args.dataset}.npz')
+        return WebKB(root='./pyg_data', name=args.dataset)
+    if args.dataset in DATASET_LIST:
+        return load_custom_data(
+            f'./data/{args.dataset}.npz', 
+            to_undirected='directed' not in args.dataset
+        )
     raise ValueError("Unknown dataset")
 
 
@@ -123,8 +138,7 @@ if __name__ == '__main__':
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     args.device = device
     # get dataset
-    transform = zero_in_degree_removal if args.transform else None
-    dataset = get_dataset(args, transform=transform)
+    dataset = get_dataset(args)
     data = dataset[0].to(args.device)
 
     features = data.x
