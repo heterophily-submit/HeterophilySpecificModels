@@ -1,6 +1,6 @@
 import tensorflow as tf
+
 from sklearn.metrics import roc_auc_score
-import numpy as np
 
 ###############################################
 # This section of code adapted from tkipf/gcn #
@@ -26,8 +26,10 @@ def masked_accuracy(preds, labels, mask):
     accuracy_all *= mask
     return tf.reduce_sum(accuracy_all)
 
+
+@tf.function
 def masked_roc_auc(preds, labels, mask):
-    """ROC AUC with masking."""
-    masked_labels = np.array(labels)[np.array(mask, dtype=bool)]
-    masked_preds = np.array(preds)[np.array(mask, dtype=bool)]
-    return roc_auc_score(masked_labels, masked_preds)
+    """Accuracy with masking."""
+    labels = tf.argmax(labels[tf.cast(mask, tf.bool)], axis=-1).numpy()
+    preds = tf.nn.softmax(preds[tf.cast(mask, tf.bool)], axis=-1).numpy()
+    return roc_auc_score(labels, preds[:, 1]) 

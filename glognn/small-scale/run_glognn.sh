@@ -40,7 +40,7 @@ do
     done
 done
 
-for DATASET in squirrel squirrel_filtered_directed roman_empire minesweeper questions amazon_ratings workers
+for DATASET in squirrel squirrel_filtered_directed roman_empire minesweeper questions amazon_ratings tolokers
 do
     echo "DATASET=${DATASET}"
     for LR in 3e-4 1e-3 3e-3 1e-2 3e-2
@@ -78,7 +78,7 @@ do
     done
 done
 
-for DATASET in roman_empire minesweeper questions amazon_ratings workers 
+for DATASET in roman_empire minesweeper questions amazon_ratings tolokers 
 do
     echo "DATASET=${DATASET}"
     for LR in 3e-4 1e-3 3e-3 1e-2 3e-2

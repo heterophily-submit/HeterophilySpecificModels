@@ -14,29 +14,28 @@ Modified by Jiong Zhu (jiongzhu@umich.edu)
 '''
 
 # %%
+import os
 import warnings
 from enum import Enum
 import numpy as np
 import pickle as pkl
 import networkx as nx
 import scipy.sparse as sp
-from scipy.sparse.linalg.eigen.arpack import eigsh
+from scipy.sparse.linalg import eigsh
 import sys
 import multiprocessing
 from itertools import chain
 from argparse import Namespace
 from pathlib import Path
-from sklearn.preprocessing import OneHotEncoder
 
 # %%
 
-import os
-import numpy as np
-import torch
-from torch.nn import functional as F
-import dgl
-from dgl import ops
-from sklearn.metrics import roc_auc_score
+DATASET_LIST = [
+    'squirrel_directed', 'chameleon_directed',
+    'squirrel_filtered_directed', 'chameleon_filtered_directed',
+    'roman_empire', 'minesweeper', 'questions', 'amazon_ratings', 'tolokers'
+]
+
 
 class TransformAdj:
     @staticmethod
@@ -191,7 +190,7 @@ class PlanetoidData:
 
     @staticmethod
     def graphDict2Adj(graph):
-        return nx.adjacency_matrix(graph, nodelist=range(len(graph)))
+        return nx.adjacency_matrix(nx.from_dict_of_lists(graph), nodelist=range(len(graph)))
 
     def getNXGraph(self):
         G = nx.from_scipy_sparse_matrix(self.sparse_adj)
@@ -200,7 +199,7 @@ class PlanetoidData:
             G.nodes[i]["color"] = int(label + 1)
         return G
 
-    def load_data(self, dataset_str, dataset_path="data", save_plot=None, val_size=None, split_id=None):
+    def load_data(self, dataset_str, dataset_path="data", save_plot=None, val_size=None):
         """
         Loads input data from gcn/data directory
 
@@ -220,177 +219,114 @@ class PlanetoidData:
         :param dataset_str: Dataset name
         :return: All data input files loaded (as well the training/test data).
         """
+        if dataset_str in ['ind.cora', 'ind.pubmed', 'ind.citeseer']:
+            names = ['x', 'y', 'tx', 'ty', 'allx', 'ally', 'graph']
+            objects = []
+            for i in range(len(names)):
+                with open("{}/{}.{}".format(dataset_path, dataset_str, names[i]), 'rb') as f:
+                    objects.append(self._pkl_load(f))
 
+            x, y, tx, ty, allx, ally, graph = tuple(objects)
+            test_idx_reorder = self.parse_index_file(
+                "{}/{}.test.index".format(dataset_path, dataset_str))
+            test_idx_range = np.sort(test_idx_reorder)
 
-        
-    if dataset_str in ['wiki_cooc', 'roman_empire', 'minesweeper', 'questions', 'amazon_ratings']:
-        npz_data = np.load(f'{dataset_path}/{dataset}.npz')
+            # Fix citeseer dataset (there are some isolated nodes in the graph)
+            # Find isolated nodes, add them as zero-vecs into the right position
+            test_idx_range_full = range(
+                min(test_idx_reorder), max(test_idx_reorder)+1)
+            tx_extended = sp.lil_matrix((len(test_idx_range_full), x.shape[1]))
+            if len(test_idx_range_full) != len(test_idx_range):
+                print(
+                    f"Patch for citeseer dataset is applied for dataset {dataset_str} at {dataset_path}")
+                tx_extended[test_idx_range-min(test_idx_range), :] = tx
+                tx = tx_extended
+                ty_extended = np.zeros((len(test_idx_range_full), y.shape[1]))
+                ty_extended[test_idx_range-min(test_idx_range), :] = ty
+                ty = ty_extended
+                self.non_valid_samples = set(
+                    test_idx_range_full) - set(test_idx_range)
+            else:
+                self.non_valid_samples = set()
 
-        assert splits_file_path is not None
-        split_id = int(splits_file_path)
+            features = sp.vstack((allx, tx)).tolil()
+            features[test_idx_reorder, :] = features[test_idx_range, :]
+            adj = self.graphDict2Adj(graph).astype(np.float32)
 
-        edge = npz_data['edges']
-        labels = npz_data['node_labels']
-        features = npz_data['node_features']
+            labels = np.vstack((ally, ty))
+            labels[test_idx_reorder, :] = labels[test_idx_range, :]
 
-        train_mask = npz_data['train_masks'][split_id]
-        val_mask   = npz_data['val_masks'][split_id]
-        test_mask  = npz_data['test_masks'][split_id]
+            # Fix citeseer (and GeomGCN) bug
+            self.non_valid_samples = self.non_valid_samples.union(
+                set(list(np.where(labels.sum(1) == 0)[0])))
 
-        valid_ids = (np.arange(len(labels)), np.unique(edge[:, 1]))[remove_zero_in_degree_nodes]
+            idx_test = test_idx_range.tolist()
+            idx_train = range(len(y))
 
-        U = [e[0] for e in edge if e[0] in valid_ids]
-        V = [e[1] for e in edge if e[0] in valid_ids]
-        g = dgl.graph((U, V))
-        g = dgl.to_simple(g)
-        g = dgl.to_bidirected(g)
-        g = dgl.remove_self_loop(g)
+            train_mask = self.sample_mask(idx_train, labels.shape[0])
+            test_mask = self.sample_mask(idx_test, labels.shape[0])
+            val_mask = np.bitwise_not(np.bitwise_or(train_mask, test_mask))
+            if val_size is not None:
+                if np.sum(val_mask) > val_size:
+                    idx_val = range(len(y), len(y) + val_size)
+                    val_mask = self.sample_mask(idx_val, labels.shape[0])
+                else:
+                    print(
+                        f"Val set size set to {np.sum(val_mask)} due to insufficient samples.")
+            wild_mask = np.bitwise_not(train_mask + val_mask + test_mask)
 
-        train = np.flatnonzero(train_mask)
-        val = np.flatnonzero(val_mask)
-        test = np.flatnonzero(test_mask)
+            for n_i in self.non_valid_samples:
+                if train_mask[n_i]:
+                    warnings.warn("Non valid samples detected in training set")
+                    train_mask[n_i] = False
+                elif test_mask[n_i]:
+                    warnings.warn("Non valid samples detected in test set")
+                    test_mask[n_i] = False
+                elif val_mask[n_i]:
+                    warnings.warn("Non valid samples detected in val set")
+                    val_mask[n_i] = False
+                wild_mask[n_i] = False
+            
+            y_train = np.zeros(labels.shape)
+            y_val = np.zeros(labels.shape)
+            y_test = np.zeros(labels.shape)
+            y_wild = np.zeros(labels.shape)
+            y_train[train_mask, :] = labels[train_mask, :]
+            y_val[val_mask, :] = labels[val_mask, :]
+            y_test[test_mask, :] = labels[test_mask, :]
+            y_wild[wild_mask, :] = labels[wild_mask , :]
+        elif dataset_str in DATASET_LIST:
+            assert self.split_id is not None
+            npz_data = np.load(os.path.join(dataset_path, f'{dataset_str}.npz'))
+            edges = npz_data['edges']
+            # to undirected
+            if not 'directed' in dataset_str:
+                edges = np.concatenate((edges, edges[:, ::-1]), axis=0)
+            adj = nx.adjacency_matrix(nx.from_edgelist(edges, create_using=nx.DiGraph)).astype(np.float32)
 
-        nclass = len(np.unique(labels))
-        features = torch.FloatTensor(features)
-        labels = torch.LongTensor(labels)
-        train = torch.LongTensor(train)
-        val = torch.LongTensor(val)
-        test = torch.LongTensor(test)
+            # get features and labels
+            features = npz_data['node_features']
+            labels = npz_data['node_labels']
+            n_labels = np.max(labels) + 1
+            labels = np.eye(n_labels)[labels]
+            features = sp.csr_matrix(features) 
 
-        return g, nclass, features, labels, train, val, test
+            train_mask = npz_data['train_masks'][self.split_id]
+            val_mask = npz_data['val_masks'][self.split_id]
+            test_mask = npz_data['test_masks'][self.split_id]
+            wild_mask = np.bitwise_not(train_mask + val_mask + test_mask)
 
-        data = np.load(os.path.join('/home/diskin/H2GCN/heterophilous/data', f'{dataset_str.replace("-", "_")}.npz'))
-        node_features = torch.tensor(data['node_features'])
-        labels = torch.tensor(data['node_labels'])
-        edges = torch.tensor(data['edges'])
+            y_train = np.zeros(labels.shape)
+            y_val = np.zeros(labels.shape)
+            y_test = np.zeros(labels.shape)
+            y_wild = np.zeros(labels.shape)
+            y_train[train_mask, :] = labels[train_mask, :]
+            y_val[val_mask, :] = labels[val_mask, :]
+            y_test[test_mask, :] = labels[test_mask, :]
+            y_wild[wild_mask, :] = labels[wild_mask , :]
+        else:
+            raise ValueError("Unknown dataset")
 
-        graph = dgl.graph((edges[:, 0], edges[:, 1]), num_nodes=len(node_features), idtype=torch.int)
-        graph = dgl.to_bidirected(graph)
-
-        num_classes = len(labels.unique())
-        num_targets = 1 if num_classes == 2 else num_classes
-        if num_targets == 1:
-            labels = labels.float()
-
-        train_masks = torch.tensor(data['train_masks'])
-        val_masks = torch.tensor(data['val_masks'])
-        test_masks = torch.tensor(data['test_masks'])
-        train_mask = train_masks[val_size]
-        val_mask = val_masks[val_size]
-        test_mask = test_masks[val_size]
-
-#         self.name = name
-#         self.device = device
-
-#         self.graph = graph.to(device)
-#         self.node_features = node_features.to(device)
-#         self.labels = labels.to(device)
-
-#         self.train_idx_list = [train_idx.to(device) for train_idx in train_idx_list]
-#         self.val_idx_list = [val_idx.to(device) for val_idx in val_idx_list]
-#         self.test_idx_list = [test_idx.to(device) for test_idx in test_idx_list]
-#         self.num_data_splits = len(train_idx_list)
-#         self.cur_data_split = 0
-
-#         self.num_node_features = node_features.shape[1]
-#         self.num_targets = num_targets
-
-#         self.loss_fn = F.binary_cross_entropy_with_logits if num_targets == 1 else F.cross_entropy
-#         self.metric = 'ROC AUC' if num_targets == 1 else 'accuracy'
-
-        
-        
-# NEW
-        print(graph)
-        adj = self.graphDict2Adj(dgl.to_networkx(graph)).astype(np.float32)
-        # labels = node_labels
-
-        onehot_encoder = OneHotEncoder(sparse=False)
-        labels = onehot_encoder.fit_transform(labels.reshape(-1, 1))
-        print(labels)
-
-
-# NEW
-        
-        
-        
-#         names = ['x', 'y', 'tx', 'ty', 'allx', 'ally', 'graph']
-#         objects = []
-#         for i in range(len(names)):
-#             with open("{}/{}.{}".format(dataset_path, dataset_str, names[i]), 'rb') as f:
-#                 objects.append(self._pkl_load(f))
-
-#         x, y, tx, ty, allx, ally, graph = tuple(objects)
-#         test_idx_reorder = self.parse_index_file(
-#             "{}/{}.test.index".format(dataset_path, dataset_str))
-#         test_idx_range = np.sort(test_idx_reorder)
-
-#         # Fix citeseer dataset (there are some isolated nodes in the graph)
-#         # Find isolated nodes, add them as zero-vecs into the right position
-#         test_idx_range_full = range(
-#             min(test_idx_reorder), max(test_idx_reorder)+1)
-#         tx_extended = sp.lil_matrix((len(test_idx_range_full), x.shape[1]))
-#         if len(test_idx_range_full) != len(test_idx_range):
-#             print(
-#                 f"Patch for citeseer dataset is applied for dataset {dataset_str} at {dataset_path}")
-#             tx_extended[test_idx_range-min(test_idx_range), :] = tx
-#             tx = tx_extended
-#             ty_extended = np.zeros((len(test_idx_range_full), y.shape[1]))
-#             ty_extended[test_idx_range-min(test_idx_range), :] = ty
-#             ty = ty_extended
-#             self.non_valid_samples = set(
-#                 test_idx_range_full) - set(test_idx_range)
-#         else:
-#             self.non_valid_samples = set()
-
-#         features = sp.vstack((allx, tx)).tolil()
-#         features[test_idx_reorder, :] = features[test_idx_range, :]
-#         adj = self.graphDict2Adj(graph).astype(np.float32)
-
-#         labels = np.vstack((ally, ty))
-#         labels[test_idx_reorder, :] = labels[test_idx_range, :]
-
-#         # Fix citeseer (and GeomGCN) bug
-#         self.non_valid_samples = self.non_valid_samples.union(
-#             set(list(np.where(labels.sum(1) == 0)[0])))
-
-#         idx_test = test_idx_range.tolist()
-#         idx_train = range(len(y))
-
-#         train_mask = self.sample_mask(idx_train, labels.shape[0])
-#         test_mask = self.sample_mask(idx_test, labels.shape[0])
-#         val_mask = np.bitwise_not(np.bitwise_or(train_mask, test_mask))
-#         if val_size is not None:
-#             if np.sum(val_mask) > val_size:
-#                 idx_val = range(len(y), len(y) + val_size)
-#                 val_mask = self.sample_mask(idx_val, labels.shape[0])
-#             else:
-#                 print(
-#                     f"Val set size set to {np.sum(val_mask)} due to insufficient samples.")
-#         wild_mask = np.bitwise_not(train_mask + val_mask + test_mask)
-
-#         for n_i in self.non_valid_samples:
-#             if train_mask[n_i]:
-#                 warnings.warn("Non valid samples detected in training set")
-#                 train_mask[n_i] = False
-#             elif test_mask[n_i]:
-#                 warnings.warn("Non valid samples detected in test set")
-#                 test_mask[n_i] = False
-#             elif val_mask[n_i]:
-#                 warnings.warn("Non valid samples detected in val set")
-#                 val_mask[n_i] = False
-#             wild_mask[n_i] = False
-        wild_mask = np.zeros(val_mask.shape, dtype=np.bool)
-
-        y_train = np.zeros(labels.shape)
-        y_val = np.zeros(labels.shape)
-        y_test = np.zeros(labels.shape)
-        y_wild = np.zeros(labels.shape)
-        y_train[train_mask, :] = labels[train_mask, :]
-        y_val[val_mask, :] = labels[val_mask, :]
-        y_test[test_mask, :] = labels[test_mask, :]
-        y_wild[wild_mask, :] = labels[wild_mask, :]
-        features=sp.csr_matrix(node_features) 
         self._sparse_data["sparse_adj"] = adj
         self._sparse_data["features"] = features
         self._dense_data["y_all"] = labels
@@ -405,7 +341,7 @@ class PlanetoidData:
         self.__preprocessedAdj = None
         self.__preprocessedFeature = None
 
-        return adj, node_features, y_train, y_val, y_test, y_wild, train_mask, val_mask, test_mask, wild_mask, labels
+        return adj, features, y_train, y_val, y_test, y_wild, train_mask, val_mask, test_mask, wild_mask, labels
 
     def __getattribute__(self, name):
         if name in ("_sparse_data", "_dense_data"):
@@ -432,7 +368,8 @@ class PlanetoidData:
         self._dense_data = dict()
         self.dataset_str = dataset_str
         self.dataset_path = dataset_path
-        self.load_data(dataset_str, dataset_path, val_size=val_size, split_id=split_id)
+        self.split_id = split_id
+        self.load_data(dataset_str, dataset_path, val_size=val_size)
         self._original_data = (self._sparse_data.copy(),
                                self._dense_data.copy())
 

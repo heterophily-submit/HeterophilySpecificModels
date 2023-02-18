@@ -11,8 +11,7 @@ from utils.statistic import compute_smoothness, split_dataset
 DATASET_LIST = [
     'squirrel_directed', 'chameleon_directed',
     'squirrel_filtered_directed', 'chameleon_filtered_directed',
-    'squirrel_filtered', 'chameleon_filtered',
-    'roman_empire', 'minesweeper', 'questions', 'amazon_ratings', 'workers'
+    'roman_empire', 'minesweeper', 'questions', 'amazon_ratings', 'tolokers'
 ]
 
 

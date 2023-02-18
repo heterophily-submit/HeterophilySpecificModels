@@ -8,7 +8,7 @@ def add_subparser_args(parser):
     subparser.add_argument("--dataset", type=str, required=True)
     subparser.add_argument("--dataset_path", type=str, dest="_dataset_path", required=True)
     subparser.add_argument("--val_size", type=int, default=500)
-    subparser.add_argument("--split_id", type=int, default=0)
+    subparser.add_argument("--split_id", type=int, default=None)
     subparser.add_argument("--feature_configs", choices=["no_test", "identity", "labels"], nargs="*", default=[])
     parser.function_hooks["argparse"].appendleft(argparse_callback)
 

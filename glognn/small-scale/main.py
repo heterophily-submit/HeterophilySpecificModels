@@ -27,7 +27,7 @@ torch.set_default_dtype(torch.float64)
 DATASET_LIST = [
     'squirrel_directed', 'chameleon_directed',
     'squirrel_filtered_directed', 'chameleon_filtered_directed',
-    'roman_empire', 'minesweeper', 'questions', 'amazon_ratings', 'workers', 'sbm_counter'
+    'roman_empire', 'minesweeper', 'questions', 'amazon_ratings', 'tolokers'
 ]
 
 
