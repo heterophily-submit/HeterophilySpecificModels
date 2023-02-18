@@ -59,8 +59,7 @@ while args.current_epoch < args.epochs:
     while args.current_epoch >= args.epochs and len(args.objects["post_train_callbacks"]) > 0:
         func = args.objects["post_train_callbacks"].popleft()
         func(args)
-print(args.objects["best_val_stats"])
-print(float(args.objects["best_val_stats"]["test_accuracy"]))
+
 if args._interactive:
     import IPython
     IPython.embed()

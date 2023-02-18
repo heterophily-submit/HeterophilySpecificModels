@@ -1,7 +1,7 @@
 from . import *
 from modules import controller, monitor
 from . import _layers as layers
-from ._metrics import masked_softmax_cross_entropy, masked_accuracy
+from ._metrics import masked_softmax_cross_entropy, masked_accuracy, masked_roc_auc
 from datasets import TransformSPAdj
 import operator
 import inspect
@@ -142,14 +142,17 @@ def initialize_model(args, layer_setups, optimizer, lr,
                                 y_train=y_train,
                                 train_mask=train_mask,
                                 training=False)
+      # select target metric
+        num_labels = y_train.shape[-1]
+        metric = (masked_roc_auc, masked_accuracy)[num_labels > 2]
         
         val_loss = masked_softmax_cross_entropy(
             predictions, y_val, val_mask)
         test_loss = masked_softmax_cross_entropy(
             predictions, y_test, test_mask)
-        train_acc = masked_accuracy(predictions, y_train, train_mask)
-        val_acc = masked_accuracy(predictions, y_val, val_mask)
-        test_acc = masked_accuracy(predictions, y_test, test_mask)
+        train_acc = metric(predictions, y_train, train_mask)
+        val_acc = metric(predictions, y_val, val_mask)
+        test_acc = metric(predictions, y_test, test_mask)
         test_stats_dict = dict(train_acc=train_acc, val_acc=val_acc, test_accuracy=test_acc,
                                val_loss=val_loss, test_loss=test_loss, monitor=dict())
         if args.deg_acc_monitor and verbose:
@@ -177,8 +180,7 @@ def initialize_model(args, layer_setups, optimizer, lr,
     args.objects["statsPrinter"] = statsPrinter
     args.objects["best_val_stats"] = None
     args.objects["current_ckpt"] = None
-    args.objects["early_stopping"] = controller.SlidingMeanEarlyStopping(
-        early_stopping)
+    args.objects["early_stopping"] = controller.EarlyStopping(early_stopping)
 
     def post_epoch_callback(epoch, args):
         if epoch == args.train_bp_after + 1:
@@ -187,7 +189,7 @@ def initialize_model(args, layer_setups, optimizer, lr,
         statsPrinter(epoch, epoch_stats_dict)
 
         # Early Stopping
-        if args.objects["early_stopping"](epoch_stats_dict["val_loss"]):
+        if args.objects["early_stopping"](epoch_stats_dict["val_acc"]):
             print("Early stopping...")
             args.current_epoch = float('inf')
 

@@ -2,7 +2,7 @@
 
 export OMP_NUM_THREADS=8
 
-for DATASET in chameleon_directed chameleon_filtered_directed squirrel_directed squirrel_filtered_directed roman_empire minesweeper questions amazon_ratings workers
+for DATASET in chameleon_directed chameleon_filtered_directed squirrel_directed squirrel_filtered_directed roman_empire minesweeper questions amazon_ratings tolokers
 do
     echo "DATASET=${DATASET}"
     for LR in 0.001 0.003 0.01 0.03 0.1
